@@ -205,16 +205,16 @@ namespace HRManagementAPI.Controllers
             var securityKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secretKey));
             var credentials = new SigningCredentials(securityKey, SecurityAlgorithms.HmacSha256);
 
-            // Create claims
+            // Create claims - MAKE SURE NameIdentifier is UserId, not Email!
             var claims = new List<Claim>
-            {
-                new Claim(JwtRegisteredClaimNames.Sub, user.Email),
-                new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
-                new Claim(ClaimTypes.NameIdentifier, user.UserId.ToString()),
-                new Claim(ClaimTypes.Email, user.Email),
-                new Claim(ClaimTypes.Role, user.Role.RoleName),
-                new Claim("RoleLevel", user.Role.RoleLevel.ToString())
-            };
+    {
+        new Claim(JwtRegisteredClaimNames.Sub, user.Email),
+        new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
+        new Claim(ClaimTypes.NameIdentifier, user.UserId.ToString()),  // ✅ MUST BE UserId
+        new Claim(ClaimTypes.Email, user.Email),
+        new Claim(ClaimTypes.Role, user.Role.RoleName),
+        new Claim("RoleLevel", user.Role.RoleLevel.ToString())
+    };
 
             // Add employee claims if employee exists
             if (user.Employee != null)

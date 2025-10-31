@@ -1,14 +1,18 @@
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using System.Text;
 using HRManagementAPI.Data;
+using HRManagementAPI.Middleware;  // ✅ ADD THIS LINE
 
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
 builder.Services.AddControllers();
+
+// Add HttpContextAccessor for accessing HTTP context in middleware
+builder.Services.AddHttpContextAccessor();  // ✅ ADD THIS LINE
 
 // Configure Entity Framework and SQL Server
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
@@ -89,6 +93,9 @@ app.UseHttpsRedirection();
 // Add Authentication & Authorization middleware
 app.UseAuthentication();
 app.UseAuthorization();
+
+// Add Audit Logging Middleware (after authentication so we have user context)
+app.UseAuditLogging();  // ✅ ADD THIS LINE
 
 app.MapControllers();
 
