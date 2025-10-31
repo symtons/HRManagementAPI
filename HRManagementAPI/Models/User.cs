@@ -22,26 +22,16 @@ namespace HRManagementAPI.Models
         [StringLength(255)]
         public string PasswordHash { get; set; }
 
-        [Required]
-        [StringLength(100)]
-        public string FirstName { get; set; }
-
-        [Required]
-        [StringLength(100)]
-        public string LastName { get; set; }
-
-        [Required]
-        [StringLength(50)]
-        public string EmployeeType { get; set; } // "AdminStaff" or "FieldStaff"
-
         public bool IsActive { get; set; } = true;
 
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
         public DateTime? LastLoginAt { get; set; }
 
-        // Navigation property - user belongs to one role
+        // Navigation properties
         [ForeignKey("RoleId")]
         public virtual Role Role { get; set; }
+
+        public virtual Employee Employee { get; set; }
     }
 }

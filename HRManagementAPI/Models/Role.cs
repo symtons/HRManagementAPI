@@ -17,9 +17,12 @@ namespace HRManagementAPI.Models
         [StringLength(255)]
         public string? RoleDescription { get; set; }
 
+        [Required]
+        public int RoleLevel { get; set; }
+
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
-        // Navigation property - one role has many users
+        // Navigation property
         public virtual ICollection<User> Users { get; set; }
     }
 }

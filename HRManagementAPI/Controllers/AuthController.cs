@@ -33,6 +33,12 @@ namespace HRManagementAPI.Controllers
                 return BadRequest(new { message = "Email already exists" });
             }
 
+            // Check if employee code already exists
+            if (await _context.Employees.AnyAsync(e => e.EmployeeCode == request.EmployeeCode))
+            {
+                return BadRequest(new { message = "Employee code already exists" });
+            }
+
             // Check if role exists
             var role = await _context.Roles.FindAsync(request.RoleId);
             if (role == null)
@@ -40,18 +46,25 @@ namespace HRManagementAPI.Controllers
                 return BadRequest(new { message = "Invalid role" });
             }
 
+            // Check if department exists (optional)
+            if (request.DepartmentId.HasValue)
+            {
+                var department = await _context.Departments.FindAsync(request.DepartmentId.Value);
+                if (department == null)
+                {
+                    return BadRequest(new { message = "Invalid department" });
+                }
+            }
+
             // Hash the password using BCrypt
             string hashedPassword = BCrypt.Net.BCrypt.HashPassword(request.Password);
 
-            // Create new user
+            // Create User
             var user = new User
             {
                 Email = request.Email,
                 PasswordHash = hashedPassword,
-                FirstName = request.FirstName,
-                LastName = request.LastName,
                 RoleId = request.RoleId,
-                EmployeeType = request.EmployeeType,
                 IsActive = true,
                 CreatedAt = DateTime.UtcNow
             };
@@ -59,11 +72,40 @@ namespace HRManagementAPI.Controllers
             _context.Users.Add(user);
             await _context.SaveChangesAsync();
 
+            // Create Employee linked to User
+            var employee = new Employee
+            {
+                UserId = user.UserId,
+                FirstName = request.FirstName,
+                LastName = request.LastName,
+                EmployeeCode = request.EmployeeCode,
+                DepartmentId = request.DepartmentId,
+                EmployeeType = request.EmployeeType,
+                JobTitle = request.JobTitle,
+                HireDate = request.HireDate ?? DateTime.UtcNow,
+                EmploymentStatus = "Active",
+                IsActive = true,
+                CreatedAt = DateTime.UtcNow
+            };
+
+            // Set PTO eligibility based on EmployeeType
+            if (request.EmployeeType == "AdminStaff")
+            {
+                employee.IsEligibleForPTO = true;
+                employee.PTOBalance = 0;
+                employee.IsEligibleForInsurance = true;
+            }
+
+            _context.Employees.Add(employee);
+            await _context.SaveChangesAsync();
+
             return Ok(new
             {
                 message = "User registered successfully",
                 userId = user.UserId,
+                employeeId = employee.EmployeeId,
                 email = user.Email,
+                employeeCode = employee.EmployeeCode,
                 role = role.RoleName
             });
         }
@@ -72,9 +114,11 @@ namespace HRManagementAPI.Controllers
         [HttpPost("Login")]
         public async Task<IActionResult> Login([FromBody] LoginRequest request)
         {
-            // Find user by email
+            // Find user by email with related data
             var user = await _context.Users
                 .Include(u => u.Role)
+                .Include(u => u.Employee)
+                    .ThenInclude(e => e.Department)
                 .FirstOrDefaultAsync(u => u.Email == request.Email);
 
             if (user == null)
@@ -108,12 +152,23 @@ namespace HRManagementAPI.Controllers
             {
                 message = "Login successful",
                 token = token,
-                userId = user.UserId,
-                email = user.Email,
-                firstName = user.FirstName,
-                lastName = user.LastName,
-                role = user.Role.RoleName,
-                employeeType = user.EmployeeType
+                user = new
+                {
+                    userId = user.UserId,
+                    email = user.Email,
+                    role = user.Role.RoleName,
+                    roleLevel = user.Role.RoleLevel
+                },
+                employee = user.Employee != null ? new
+                {
+                    employeeId = user.Employee.EmployeeId,
+                    firstName = user.Employee.FirstName,
+                    lastName = user.Employee.LastName,
+                    employeeCode = user.Employee.EmployeeCode,
+                    department = user.Employee.Department?.DepartmentName,
+                    jobTitle = user.Employee.JobTitle,
+                    employeeType = user.Employee.EmployeeType
+                } : null
             });
         }
 
@@ -121,8 +176,21 @@ namespace HRManagementAPI.Controllers
         [HttpGet("Roles")]
         public async Task<IActionResult> GetRoles()
         {
-            var roles = await _context.Roles.ToListAsync();
+            var roles = await _context.Roles
+                .OrderBy(r => r.RoleLevel)
+                .ToListAsync();
             return Ok(roles);
+        }
+
+        // GET: api/Auth/Departments
+        [HttpGet("Departments")]
+        public async Task<IActionResult> GetDepartments()
+        {
+            var departments = await _context.Departments
+                .Where(d => d.IsActive)
+                .OrderBy(d => d.DepartmentName)
+                .ToListAsync();
+            return Ok(departments);
         }
 
         // Private method to generate JWT token
@@ -138,17 +206,29 @@ namespace HRManagementAPI.Controllers
             var credentials = new SigningCredentials(securityKey, SecurityAlgorithms.HmacSha256);
 
             // Create claims
-            var claims = new[]
+            var claims = new List<Claim>
             {
                 new Claim(JwtRegisteredClaimNames.Sub, user.Email),
                 new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
                 new Claim(ClaimTypes.NameIdentifier, user.UserId.ToString()),
                 new Claim(ClaimTypes.Email, user.Email),
-                new Claim(ClaimTypes.GivenName, user.FirstName),
-                new Claim(ClaimTypes.Surname, user.LastName),
                 new Claim(ClaimTypes.Role, user.Role.RoleName),
-                new Claim("EmployeeType", user.EmployeeType)
+                new Claim("RoleLevel", user.Role.RoleLevel.ToString())
             };
+
+            // Add employee claims if employee exists
+            if (user.Employee != null)
+            {
+                claims.Add(new Claim("EmployeeId", user.Employee.EmployeeId.ToString()));
+                claims.Add(new Claim(ClaimTypes.GivenName, user.Employee.FirstName));
+                claims.Add(new Claim(ClaimTypes.Surname, user.Employee.LastName));
+                claims.Add(new Claim("EmployeeType", user.Employee.EmployeeType));
+
+                if (user.Employee.DepartmentId.HasValue)
+                {
+                    claims.Add(new Claim("DepartmentId", user.Employee.DepartmentId.Value.ToString()));
+                }
+            }
 
             // Create token
             var token = new JwtSecurityToken(
@@ -171,7 +251,11 @@ namespace HRManagementAPI.Controllers
         public string FirstName { get; set; }
         public string LastName { get; set; }
         public int RoleId { get; set; }
-        public string EmployeeType { get; set; }
+        public string EmployeeCode { get; set; }
+        public int? DepartmentId { get; set; }
+        public string EmployeeType { get; set; } // AdminStaff or FieldStaff
+        public string? JobTitle { get; set; }
+        public DateTime? HireDate { get; set; }
     }
 
     public class LoginRequest
