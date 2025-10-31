@@ -2,8 +2,6 @@
 using HRManagementAPI.Models;
 using Microsoft.EntityFrameworkCore;
 using System.Security.Claims;
-using System.Text;
-using System.Text.Json;
 
 namespace HRManagementAPI.Middleware
 {
@@ -31,21 +29,32 @@ namespace HRManagementAPI.Middleware
                 return;
             }
 
-            var startTime = DateTime.UtcNow;
-
             try
             {
                 // Execute the request first
                 await _next(context);
 
-                // Log after request is processed
-                var duration = DateTime.UtcNow - startTime;
-                var userId = context.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                // Get UserId - find ALL nameidentifier claims and get the one that's a number
+                var nameIdentifierClaims = context.User.Claims
+                    .Where(c => c.Type == ClaimTypes.NameIdentifier ||
+                               c.Type == "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier")
+                    .ToList();
+
+                string userId = null;
+                foreach (var claim in nameIdentifierClaims)
+                {
+                    // If it's a number, use it!
+                    if (int.TryParse(claim.Value, out _))
+                    {
+                        userId = claim.Value;
+                        break;
+                    }
+                }
 
                 _logger.LogInformation("Audit: Path={Path}, UserId={UserId}, Status={Status}",
                     path, userId ?? "Anonymous", context.Response.StatusCode);
 
-                // Only log if we have a valid userId
+                // Only log if we have a valid userId that can be parsed as integer
                 if (!string.IsNullOrEmpty(userId) && int.TryParse(userId, out int userIdInt))
                 {
                     try
@@ -83,8 +92,8 @@ namespace HRManagementAPI.Middleware
                             dbContext.AuditLogs.Add(auditLog);
                             await dbContext.SaveChangesAsync();
 
-                            _logger.LogInformation("Audit log saved: User={Email}, Action={Action}, Entity={Entity}",
-                                user.Email, action, entityName);
+                            _logger.LogInformation("✅ Audit log saved: UserId={UserId}, User={Email}, Action={Action}, Entity={Entity}",
+                                userIdInt, user.Email, action, entityName);
                         }
                     }
                     catch (Exception ex)
