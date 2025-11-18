@@ -49,6 +49,7 @@ namespace HRManagementAPI.Models
         [StringLength(100)]
         public string? State { get; set; }
 
+
         [StringLength(20)]
         public string? ZipCode { get; set; }
 
