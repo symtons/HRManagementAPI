@@ -293,6 +293,131 @@ namespace HRManagementAPI.Controllers
                 return StatusCode(500, new { message = "Error retrieving employee", error = ex.Message });
             }
         }
+        [HttpPut("{id}")]
+        public async Task<IActionResult> UpdateEmployee(int id, [FromBody] UpdateEmployeeRequest request)
+        {
+            try
+            {
+                // Get current user's role
+                var userRole = User.FindFirst(ClaimTypes.Role)?.Value;
+                var userEmployeeIdClaim = User.FindFirst("EmployeeId")?.Value;
+
+                if (string.IsNullOrEmpty(userRole))
+                {
+                    return Unauthorized(new { message = "User role not found" });
+                }
+
+                // Get role details
+                var role = await _context.Roles.FirstOrDefaultAsync(r => r.RoleName == userRole);
+                if (role == null)
+                {
+                    return NotFound(new { message = "Role not found" });
+                }
+
+                // Find the employee to update
+                var employee = await _context.Employees
+                    .Include(e => e.User)
+                    .Include(e => e.Department)
+                    .FirstOrDefaultAsync(e => e.EmployeeId == id);
+
+                if (employee == null)
+                {
+                    return NotFound(new { message = "Employee not found" });
+                }
+
+                // Check permission: Directors can only edit their department employees
+                if (role.RoleName == "Director" && !string.IsNullOrEmpty(userEmployeeIdClaim))
+                {
+                    var currentEmployee = await _context.Employees.FindAsync(int.Parse(userEmployeeIdClaim));
+                    if (currentEmployee == null || employee.DepartmentId != currentEmployee.DepartmentId)
+                    {
+                        return Forbid("You can only edit employees in your department");
+                    }
+                }
+
+                // Validate department if changed
+                if (request.DepartmentId.HasValue && request.DepartmentId != employee.DepartmentId)
+                {
+                    var department = await _context.Departments.FindAsync(request.DepartmentId.Value);
+                    if (department == null)
+                    {
+                        return BadRequest(new { message = "Invalid department" });
+                    }
+                }
+
+                // Validate employee code uniqueness if changed
+                if (!string.IsNullOrEmpty(request.EmployeeCode) && request.EmployeeCode != employee.EmployeeCode)
+                {
+                    if (await _context.Employees.AnyAsync(e => e.EmployeeCode == request.EmployeeCode && e.EmployeeId != id))
+                    {
+                        return BadRequest(new { message = "Employee code already exists" });
+                    }
+                }
+
+                // Update employee fields
+                employee.FirstName = request.FirstName ?? employee.FirstName;
+                employee.LastName = request.LastName ?? employee.LastName;
+                employee.EmployeeCode = request.EmployeeCode ?? employee.EmployeeCode;
+                employee.DepartmentId = request.DepartmentId ?? employee.DepartmentId;
+                employee.JobTitle = request.JobTitle ?? employee.JobTitle;
+                employee.EmployeeType = request.EmployeeType ?? employee.EmployeeType;
+
+                // Personal Info
+                if (request.DateOfBirth.HasValue) employee.DateOfBirth = request.DateOfBirth;
+                if (!string.IsNullOrEmpty(request.Gender)) employee.Gender = request.Gender;
+                if (!string.IsNullOrEmpty(request.PhoneNumber)) employee.PhoneNumber = request.PhoneNumber;
+                if (!string.IsNullOrEmpty(request.PersonalEmail)) employee.PersonalEmail = request.PersonalEmail;
+
+                // Address
+                if (!string.IsNullOrEmpty(request.Address)) employee.Address = request.Address;
+                employee.Address = request.Address; // Can be null
+                if (!string.IsNullOrEmpty(request.City)) employee.City = request.City;
+                if (!string.IsNullOrEmpty(request.State)) employee.State = request.State;
+                if (!string.IsNullOrEmpty(request.ZipCode)) employee.ZipCode = request.ZipCode;
+
+                // Employment Info
+                if (request.HireDate.HasValue) employee.HireDate = request.HireDate;
+                if (request.ManagerId.HasValue) employee.ManagerId = request.ManagerId;
+                if (!string.IsNullOrEmpty(request.EmploymentStatus)) employee.EmploymentStatus = request.EmploymentStatus;
+
+                // Emergency Contact
+                if (!string.IsNullOrEmpty(request.EmergencyContactName)) employee.EmergencyContactName = request.EmergencyContactName;
+                if (!string.IsNullOrEmpty(request.EmergencyContactRelationship)) employee.EmergencyContactRelationship = request.EmergencyContactRelationship;
+                if (!string.IsNullOrEmpty(request.EmergencyContactPhone)) employee.EmergencyContactPhone = request.EmergencyContactPhone;
+
+                // Update PTO eligibility if EmployeeType changed
+                if (request.EmployeeType != null && request.EmployeeType != employee.EmployeeType)
+                {
+                    if (request.EmployeeType == "AdminStaff")
+                    {
+                        employee.IsEligibleForPTO = true;
+                        employee.IsEligibleForInsurance = true;
+                    }
+                    else
+                    {
+                        employee.IsEligibleForPTO = false;
+                        employee.IsEligibleForInsurance = false;
+                    }
+                }
+
+                employee.UpdatedAt = DateTime.UtcNow;
+
+                await _context.SaveChangesAsync();
+
+                return Ok(new
+                {
+                    message = "Employee updated successfully",
+                    employeeId = employee.EmployeeId,
+                    employeeCode = employee.EmployeeCode
+                });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { message = "Error updating employee", error = ex.Message });
+            }
+        }
+
+
 
         // GET: api/Employee/Stats
         // Get employee statistics for dashboard
@@ -348,5 +473,40 @@ namespace HRManagementAPI.Controllers
                 return StatusCode(500, new { message = "Error retrieving stats", error = ex.Message });
             }
         }
+
+
     }
+
+    public class UpdateEmployeeRequest
+    {
+        // Personal Info
+        public string? FirstName { get; set; }
+        public string? LastName { get; set; }
+        public DateTime? DateOfBirth { get; set; }
+        public string? Gender { get; set; }
+        public string? PhoneNumber { get; set; }
+        public string? PersonalEmail { get; set; }
+
+        // Address
+        public string? Address{ get; set; }
+       
+        public string? City { get; set; }
+        public string? State { get; set; }
+        public string? ZipCode { get; set; }
+
+        // Employment Info
+        public string? EmployeeCode { get; set; }
+        public string? EmployeeType { get; set; }
+        public int? DepartmentId { get; set; }
+        public string? JobTitle { get; set; }
+        public DateTime? HireDate { get; set; }
+        public int? ManagerId { get; set; }
+        public string? EmploymentStatus { get; set; }
+
+        // Emergency Contact
+        public string? EmergencyContactName { get; set; }
+        public string? EmergencyContactRelationship { get; set; }
+        public string? EmergencyContactPhone { get; set; }
+    }
+
 }

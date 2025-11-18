@@ -42,7 +42,7 @@ namespace HRManagementAPI.Models
 
         [StringLength(500)]
         public string? Address { get; set; }
-
+       
         [StringLength(100)]
         public string? City { get; set; }
 
