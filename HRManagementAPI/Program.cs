@@ -4,12 +4,22 @@ using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using System.Text;
 using HRManagementAPI.Data;
-using HRManagementAPI.Middleware;  // ✅ ADD THIS LINE
+using HRManagementAPI.Middleware;  
 
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
 builder.Services.AddControllers();
+// Add CORS policy for React app
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AllowReactApp",
+        policy => policy
+            .WithOrigins("http://localhost:3000")
+            .AllowAnyMethod()
+            .AllowAnyHeader()
+            .AllowCredentials());
+});
 
 // Add HttpContextAccessor for accessing HTTP context in middleware
 builder.Services.AddHttpContextAccessor();  // ✅ ADD THIS LINE
@@ -89,6 +99,8 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
+
+app.UseCors("AllowReactApp");
 
 // Add Authentication & Authorization middleware
 app.UseAuthentication();
