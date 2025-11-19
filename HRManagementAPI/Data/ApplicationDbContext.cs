@@ -18,5 +18,6 @@ namespace HRManagementAPI.Data
         public DbSet<MenuItem> MenuItems { get; set; }
         public DbSet<RoleMenuPermission> RoleMenuPermissions { get; set; }
         public DbSet<AuditLog> AuditLogs { get; set; }
+        public DbSet<Banking> Banking { get; set; }
     }
 }

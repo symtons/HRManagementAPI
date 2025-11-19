@@ -144,5 +144,7 @@ namespace HRManagementAPI.Models
         public virtual Employee? Manager { get; set; }
 
         public virtual ICollection<Employee> Subordinates { get; set; }
+
+        public virtual Banking? Banking { get; set; }
     }
 }
