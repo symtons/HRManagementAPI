@@ -19,5 +19,9 @@ namespace HRManagementAPI.Data
         public DbSet<RoleMenuPermission> RoleMenuPermissions { get; set; }
         public DbSet<AuditLog> AuditLogs { get; set; }
         public DbSet<Banking> Banking { get; set; }
+        public DbSet<LeaveType> LeaveTypes { get; set; }
+        public DbSet<LeaveRequest> LeaveRequests { get; set; }
+        public DbSet<LeaveBalance> LeaveBalance { get; set; }
+        public DbSet<LeaveCalendar> LeaveCalendar { get; set; }
     }
 }

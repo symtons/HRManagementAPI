@@ -85,6 +85,9 @@ namespace HRManagementAPI.Models
         [StringLength(50)]
         public string EmploymentStatus { get; set; } = "Active";
 
+        [StringLength(50)]
+        public string EmploymentType { get; set; } 
+
         public DateTime? HireDate { get; set; }
 
         public DateTime? TerminationDate { get; set; }
