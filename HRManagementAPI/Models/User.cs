@@ -33,5 +33,21 @@ namespace HRManagementAPI.Models
         public virtual Role Role { get; set; }
 
         public virtual Employee Employee { get; set; }
+
+
+
+        [MaxLength(50)]
+        public string AccountStatus { get; set; } = "Active";
+        // PendingOnboarding/Active/Inactive/Suspended
+
+        [MaxLength(50)]
+        public string OnboardingStatus { get; set; } = "NotStarted";
+        // NotStarted/InProgress/Completed
+
+        public DateTime? OnboardingCompletedDate { get; set; }
+       
+
+
+        public int? EmployeeId { get; set; }
     }
 }

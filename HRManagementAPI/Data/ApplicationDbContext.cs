@@ -23,5 +23,9 @@ namespace HRManagementAPI.Data
         public DbSet<LeaveRequest> LeaveRequests { get; set; }
         public DbSet<LeaveBalance> LeaveBalance { get; set; }
         public DbSet<LeaveCalendar> LeaveCalendar { get; set; }
+
+        public DbSet<JobApplication> JobApplications { get; set; }
+        public DbSet<OnboardingTask> OnboardingTasks { get; set; }
+        public DbSet<EmployeeOnboardingTask> EmployeeOnboardingTasks { get; set; }
     }
 }

@@ -87,6 +87,7 @@ builder.Services.AddSwaggerGen(options =>
             new string[] {}
         }
     });
+    options.OperationFilter<HRManagementAPI.FileUploadOperationFilter>();
 });
 
 var app = builder.Build();
@@ -108,6 +109,7 @@ app.UseAuthorization();
 
 // Add Audit Logging Middleware (after authentication so we have user context)
 app.UseAuditLogging();  // ✅ ADD THIS LINE
+
 
 app.MapControllers();
 
