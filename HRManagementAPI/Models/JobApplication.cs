@@ -28,6 +28,9 @@ namespace HRManagementAPI.Models
         [StringLength(50)]
         public string? MiddleName { get; set; }
 
+        [StringLength(50)]
+        public string? Position1 { get; set; }
+
         public DateTime? DateOfBirth { get; set; }
 
         [StringLength(20)]
@@ -86,6 +89,64 @@ namespace HRManagementAPI.Models
 
         [StringLength(20)]
         public string? EmergencyContactPhone { get; set; }
+
+        // ADD THESE PROPERTIES TO YOUR JobApplication.cs MODEL
+        // Add them in the "STATUS & METADATA" section (around line 500-600)
+
+        // Find this section in your model:
+        // ================================================================
+        // STATUS & METADATA
+        // ================================================================
+
+        // ADD THESE MISSING PROPERTIES:
+
+        [StringLength(50)]
+        public string? ApprovalStatus { get; set; } = "Pending"; // Pending/Approved/Rejected
+
+        public DateTime? ReviewedDate { get; set; }
+
+        [StringLength(500)]
+        public string? RejectionReason { get; set; }
+
+        public string? ReviewNotes { get; set; }
+
+        public DateTime? LastModified { get; set; }
+
+        // Also add these for future hiring workflow:
+        public int? EmployeeId { get; set; }
+
+        public int? UserId { get; set; }
+
+        public int? DepartmentId { get; set; }
+
+        [StringLength(200)]
+        public string? JobTitle { get; set; }
+
+        [StringLength(50)]
+        public string? EmployeeType { get; set; }
+
+        public DateTime? HireDate { get; set; }
+
+        [StringLength(50)]
+        public string? ApplicationNumber { get; set; }
+
+        public DateTime? SubmissionDate { get; set; }
+
+        [StringLength(20)]
+        public string? CellPhone { get; set; }
+
+        [StringLength(20)]
+        public string? HomePhone { get; set; }
+
+        // Navigation properties at the bottom of the class:
+        [ForeignKey("EmployeeId")]
+        public virtual Employee? Employee { get; set; }
+
+        [ForeignKey("UserId")]
+        public virtual User? User { get; set; }
+
+        [ForeignKey("DepartmentId")]
+        public virtual Department? Department { get; set; }
 
         // ================================================================
         // POSITION DETAILS
