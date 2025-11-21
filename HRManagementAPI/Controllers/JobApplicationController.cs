@@ -24,7 +24,11 @@ namespace HRManagementAPI.Controllers
         // POST: api/JobApplication/Submit (Public - No Auth)
         [HttpPost("Submit")]
         [AllowAnonymous]
-        public async Task<IActionResult> SubmitApplication([FromBody] JobApplicationSubmitRequest request)
+        public async Task<IActionResult> SubmitApplication(
+      [FromForm] JobApplicationSubmitRequest request,
+      [FromForm] IFormFile? resumeFile,
+      [FromForm] IFormFile? coverLetterFile,
+      [FromForm] List<IFormFile>? certificationFiles)
         {
             try
             {
@@ -363,6 +367,45 @@ namespace HRManagementAPI.Controllers
                 return StatusCode(500, new { message = "Error retrieving pending applications", error = ex.Message });
             }
         }
+
+        // GET: api/JobApplication/Status/123
+        [HttpGet("Status/{applicationId}")]
+        [AllowAnonymous]
+        public async Task<IActionResult> GetApplicationStatus(int applicationId)
+        {
+            try
+            {
+                var application = await _context.JobApplications
+                    .Include(a => a.Reviewer) // ✅ Use Reviewer, not ReviewedByUser
+                    .FirstOrDefaultAsync(a => a.ApplicationId == applicationId);
+
+                if (application == null)
+                {
+                    return NotFound(new { message = "Application not found" });
+                }
+
+                return Ok(new
+                {
+                    applicationId = application.ApplicationId,
+                    applicationNumber = application.ApplicationNumber,
+                    applicantName = $"{application.FirstName} {application.LastName}",
+                    positionAppliedFor = application.Position1,
+                    applicationDate = application.SubmissionDate,
+                    status = application.Status,
+                    approvalStatus = application.ApprovalStatus,
+                    reviewedBy = application.Reviewer != null
+                        ? application.Reviewer.Email
+                        : null,
+                    reviewedDate = application.ReviewedDate
+                });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { message = "Error fetching status", error = ex.Message });
+            }
+        }
+
+
 
         // GET: api/JobApplication/{id}
         [HttpGet("{id}")]
