@@ -207,48 +207,7 @@ namespace HRManagementAPI.Controllers
             }
         }
 
-        // PUT: api/JobApplication/{id}/Status
-        [HttpPut("{id}/Status")]
-        public async Task<IActionResult> UpdateApplicationStatus(int id, [FromBody] UpdateStatusDto statusDto)
-        {
-            try
-            {
-                var application = await _context.JobApplications
-                    .FirstOrDefaultAsync(a => a.ApplicationId == id);
-
-                if (application == null)
-                {
-                    return NotFound(new { message = "Application not found" });
-                }
-
-                application.Status = statusDto.Status;
-                application.UpdatedAt = DateTime.UtcNow;
-
-                if (statusDto.ReviewedBy.HasValue)
-                {
-                    application.ReviewedBy = statusDto.ReviewedBy;
-                    application.ReviewedAt = DateTime.UtcNow;
-                }
-
-                if (!string.IsNullOrEmpty(statusDto.Notes))
-                {
-                    application.Notes = statusDto.Notes;
-                }
-
-                await _context.SaveChangesAsync();
-
-                return Ok(new { message = "Application status updated successfully" });
-            }
-            catch (Exception ex)
-            {
-                return StatusCode(500, new { message = "Error updating status", error = ex.Message });
-            }
-        }
-        // ===================================================
-        // ADD THESE ENDPOINTS TO JobApplicationController.cs
-        // ===================================================
-
-        // 1. GET ALL APPLICATIONS
+       
         [HttpGet("All")]
         [Authorize(Roles = "Admin,Executive,HRManager")]
         public async Task<IActionResult> GetAllApplications(
@@ -352,26 +311,7 @@ namespace HRManagementAPI.Controllers
             return Ok(new { message = "Status updated" });
         }
 
-        // 4. REJECT APPLICATION
-        [HttpPost("{id}/Reject")]
-        [Authorize(Roles = "Admin,Executive,HRManager")]
-        public async Task<IActionResult> RejectApplicationWithReason(int id, [FromBody] RejectRequest request)
-        {
-            var application = await _context.JobApplications.FindAsync(id);
-            if (application == null) return NotFound();
-
-            var userId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? "0");
-
-            application.ApprovalStatus = "Rejected";
-            application.Status = "Rejected";
-            application.RejectionReason = request.RejectionReason;
-            application.ReviewedBy = userId;
-            application.ReviewedDate = DateTime.UtcNow;
-            application.LastModified = DateTime.UtcNow;
-
-            await _context.SaveChangesAsync();
-            return Ok(new { message = "Application rejected" });
-        }
+        
 
         // 5. ADD REVIEW NOTES
         [HttpPost("{id}/Notes")]
@@ -425,40 +365,7 @@ namespace HRManagementAPI.Controllers
             }
         }
 
-        // 2. ADD REVIEW NOTES ENDPOINT
-        [HttpPost("{id}/Notes")]
-        [Authorize(Roles = "Admin,Executive,HRManager")]
-        public async Task<IActionResult> AddReviewNotes(int id, [FromBody] NotesRequest request)
-        {
-            try
-            {
-                var application = await _context.JobApplications.FindAsync(id);
-                if (application == null)
-                    return NotFound(new { message = "Application not found" });
-
-                var userId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? "0");
-                var userName = User.FindFirst(ClaimTypes.Name)?.Value ?? "User";
-
-                var timestamp = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm");
-                var newNote = $"[{timestamp}] {userName}: {request.Notes}";
-
-                application.ReviewNotes = string.IsNullOrEmpty(application.ReviewNotes)
-                    ? newNote
-                    : application.ReviewNotes + "\n\n" + newNote;
-
-                application.ReviewedBy = userId;
-                application.ReviewedDate = DateTime.UtcNow;
-                application.LastModified = DateTime.UtcNow;
-
-                await _context.SaveChangesAsync();
-
-                return Ok(new { message = "Notes added successfully", reviewNotes = application.ReviewNotes });
-            }
-            catch (Exception ex)
-            {
-                return StatusCode(500, new { message = "Error adding notes", error = ex.Message });
-            }
-        }
+      
 
         // 3. UPDATE APPROVAL STATUS ENDPOINT
         [HttpPut("{id}/Approval")]
