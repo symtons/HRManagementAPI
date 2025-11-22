@@ -114,62 +114,73 @@ namespace HRManagementAPI.Controllers
         [HttpPost("Login")]
         public async Task<IActionResult> Login([FromBody] LoginRequest request)
         {
-            // Find user by email with related data
-            var user = await _context.Users
-                .Include(u => u.Role)
-                .Include(u => u.Employee)
-                    .ThenInclude(e => e.Department)
-                .FirstOrDefaultAsync(u => u.Email == request.Email);
-
-            if (user == null)
+            try
             {
-                return Unauthorized(new { message = "Invalid email or password" });
-            }
+                // Find user by email with role
+                var user = await _context.Users
+                    .Include(u => u.Role)
+                    .FirstOrDefaultAsync(u => u.Email == request.Email);
 
-            // Check if user is active
-            if (!user.IsActive)
-            {
-                return Unauthorized(new { message = "Account is deactivated" });
-            }
-
-            // Verify password using BCrypt
-            bool isPasswordValid = BCrypt.Net.BCrypt.Verify(request.Password, user.PasswordHash);
-
-            if (!isPasswordValid)
-            {
-                return Unauthorized(new { message = "Invalid email or password" });
-            }
-
-            // Update last login
-            user.LastLoginAt = DateTime.UtcNow;
-            await _context.SaveChangesAsync();
-
-            // Generate JWT Token
-            var token = GenerateJwtToken(user);
-
-            // Return user info with token
-            return Ok(new
-            {
-                message = "Login successful",
-                token = token,
-                user = new
+                if (user == null)
                 {
-                    userId = user.UserId,
-                    email = user.Email,
-                    role = user.Role.RoleName,
-                    roleLevel = user.Role.RoleLevel
-                },
-                employee = user.Employee != null ? new
+                    return Unauthorized(new { message = "Invalid email or password" });
+                }
+
+                // Check if user is active
+                if (!user.IsActive)
                 {
-                    employeeId = user.Employee.EmployeeId,
-                    firstName = user.Employee.FirstName,
-                    lastName = user.Employee.LastName,
-                    employeeCode = user.Employee.EmployeeCode,
-                    department = user.Employee.Department?.DepartmentName,
-                    jobTitle = user.Employee.JobTitle,
-                    employeeType = user.Employee.EmployeeType
-                } : null
-            });
+                    return Unauthorized(new { message = "Account is deactivated" });
+                }
+
+                // Verify password using BCrypt
+                bool isPasswordValid = BCrypt.Net.BCrypt.Verify(request.Password, user.PasswordHash);
+
+                if (!isPasswordValid)
+                {
+                    return Unauthorized(new { message = "Invalid email or password" });
+                }
+
+                // Get employee data using projection to avoid NULL issues
+                var employee = await _context.Employees
+                    .Where(e => e.UserId == user.UserId)
+                    .Select(e => new
+                    {
+                        e.EmployeeId,
+                        FirstName = e.FirstName ?? "",
+                        LastName = e.LastName ?? "",
+                        EmployeeCode = e.EmployeeCode ?? "",
+                        DepartmentName = e.Department != null ? e.Department.DepartmentName : null,
+                        JobTitle = e.JobTitle,
+                        EmployeeType = e.EmployeeType ?? ""
+                    })
+                    .FirstOrDefaultAsync();
+
+                // Update last login
+                user.LastLoginAt = DateTime.UtcNow;
+                await _context.SaveChangesAsync();
+
+                // Generate JWT Token
+                var token = GenerateJwtToken(user, employee);
+
+                // Return user info with token
+                return Ok(new
+                {
+                    message = "Login successful",
+                    token = token,
+                    user = new
+                    {
+                        userId = user.UserId,
+                        email = user.Email,
+                        role = user.Role.RoleName,
+                        roleLevel = user.Role.RoleLevel
+                    },
+                    employee = employee
+                });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { message = "Login failed", error = ex.Message });
+            }
         }
 
         // GET: api/Auth/Roles
@@ -194,7 +205,8 @@ namespace HRManagementAPI.Controllers
         }
 
         // Private method to generate JWT token
-        private string GenerateJwtToken(User user)
+        // Private method to generate JWT token
+        private string GenerateJwtToken(User user, dynamic employee)
         {
             var jwtSettings = _configuration.GetSection("JwtSettings");
             var secretKey = jwtSettings["SecretKey"];
@@ -208,7 +220,8 @@ namespace HRManagementAPI.Controllers
             // Create claims
             var claims = new List<Claim>
     {
-        new Claim(JwtRegisteredClaimNames.Sub, user.UserId.ToString()),  // ✅ CHANGE TO UserId
+        new Claim(ClaimTypes.NameIdentifier, user.UserId.ToString()),
+        new Claim(JwtRegisteredClaimNames.Sub, user.UserId.ToString()),
         new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
         new Claim(ClaimTypes.Email, user.Email),
         new Claim(ClaimTypes.Role, user.Role.RoleName),
@@ -216,20 +229,26 @@ namespace HRManagementAPI.Controllers
     };
 
             // Add employee claims if employee exists
-            if (user.Employee != null)
+            if (employee != null)
             {
-                claims.Add(new Claim("EmployeeId", user.Employee.EmployeeId.ToString()));
-                claims.Add(new Claim(ClaimTypes.GivenName, user.Employee.FirstName));
-                claims.Add(new Claim(ClaimTypes.Surname, user.Employee.LastName));
-                claims.Add(new Claim("EmployeeType", user.Employee.EmployeeType));
+                claims.Add(new Claim("EmployeeId", employee.EmployeeId.ToString()));
 
-                if (user.Employee.DepartmentId.HasValue)
+                if (!string.IsNullOrEmpty(employee.FirstName))
                 {
-                    claims.Add(new Claim("DepartmentId", user.Employee.DepartmentId.Value.ToString()));
+                    claims.Add(new Claim(ClaimTypes.GivenName, employee.FirstName));
+                }
+
+                if (!string.IsNullOrEmpty(employee.LastName))
+                {
+                    claims.Add(new Claim(ClaimTypes.Surname, employee.LastName));
+                }
+
+                if (!string.IsNullOrEmpty(employee.EmployeeType))
+                {
+                    claims.Add(new Claim("EmployeeType", employee.EmployeeType));
                 }
             }
 
-            // Create token
             var token = new JwtSecurityToken(
                 issuer: issuer,
                 audience: audience,

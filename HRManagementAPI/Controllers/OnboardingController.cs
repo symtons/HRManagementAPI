@@ -366,7 +366,7 @@ namespace HRManagementAPI.Controllers
         [HttpPost("Task/{taskId}/Upload")]
         [Consumes("multipart/form-data")]
         public async Task<IActionResult> UploadDocument(int taskId, IFormFile file)
-       
+
         {
             try
             {
@@ -698,11 +698,9 @@ namespace HRManagementAPI.Controllers
             }
         }
 
-        // ===== PRIVATE HELPER METHODS =====
-
+        // Helper method to check if all required tasks are complete and activate account
         private async Task CheckAndActivateAccount(int employeeId)
         {
-            // Get all required tasks for this employee
             var allRequiredTasksCompleted = await _context.EmployeeOnboardingTasks
                 .Include(t => t.Task)
                 .Where(t => t.EmployeeId == employeeId && t.Task.IsRequired)
@@ -710,9 +708,18 @@ namespace HRManagementAPI.Controllers
 
             if (allRequiredTasksCompleted)
             {
-                // Find the user and activate account
+                // Find the employee first
+                var employee = await _context.Employees
+                    .FirstOrDefaultAsync(e => e.EmployeeId == employeeId);
+
+                if (employee == null || !employee.UserId.HasValue)
+                {
+                    return;
+                }
+
+                // Find the user by UserId (not by EmployeeId which doesn't exist)
                 var user = await _context.Users
-                    .FirstOrDefaultAsync(u => u.EmployeeId == employeeId);
+                    .FirstOrDefaultAsync(u => u.UserId == employee.UserId.Value);
 
                 if (user != null && user.AccountStatus == "PendingOnboarding")
                 {
@@ -721,14 +728,8 @@ namespace HRManagementAPI.Controllers
                     user.OnboardingCompletedDate = DateTime.UtcNow;
 
                     // Update employee status
-                    var employee = await _context.Employees
-                        .FirstOrDefaultAsync(e => e.EmployeeId == employeeId);
-
-                    if (employee != null)
-                    {
-                        employee.EmploymentStatus = "Active";
-                        employee.UpdatedAt = DateTime.UtcNow;
-                    }
+                    employee.EmploymentStatus = "Active";
+                    employee.UpdatedAt = DateTime.UtcNow;
 
                     await _context.SaveChangesAsync();
 
@@ -736,33 +737,31 @@ namespace HRManagementAPI.Controllers
                 }
             }
         }
-    }
 
-    // ===== REQUEST MODELS =====
+        public class CompleteTaskRequest
+        {
+            public string? SubmittedData { get; set; }
+            public string? Notes { get; set; }
+        }
 
-    public class CompleteTaskRequest
-    {
-        public string? SubmittedData { get; set; }
-        public string? Notes { get; set; }
-    }
+        public class VerifyTaskRequest
+        {
+            public bool IsVerified { get; set; }
+            public string? VerificationNotes { get; set; }
+        }
 
-    public class VerifyTaskRequest
-    {
-        public bool IsVerified { get; set; }
-        public string? VerificationNotes { get; set; }
-    }
+        public class ExtendDueDateRequest
+        {
+            public DateTime NewDueDate { get; set; }
+            public string? Notes { get; set; }
+        }
 
-    public class ExtendDueDateRequest
-    {
-        public DateTime NewDueDate { get; set; }
-        public string? Notes { get; set; }
-    }
-
-    public class AssignTaskRequest
-    {
-        public int EmployeeId { get; set; }
-        public int TaskId { get; set; }
-        public DateTime? DueDate { get; set; }
-        public string? Notes { get; set; }
+        public class AssignTaskRequest
+        {
+            public int EmployeeId { get; set; }
+            public int TaskId { get; set; }
+            public DateTime? DueDate { get; set; }
+            public string? Notes { get; set; }
+        }
     }
 }

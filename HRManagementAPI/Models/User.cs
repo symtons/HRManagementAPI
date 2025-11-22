@@ -48,6 +48,6 @@ namespace HRManagementAPI.Models
        
 
 
-        public int? EmployeeId { get; set; }
+        
     }
 }
