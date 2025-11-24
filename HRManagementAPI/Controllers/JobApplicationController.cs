@@ -440,6 +440,238 @@ namespace HRManagementAPI.Controllers
                 return StatusCode(500, new { message = "Error generating PDF", error = ex.Message });
             }
         }
+
+        // POST: api/JobApplication/{id}/Hire
+        // HR hires a candidate - creates User, Employee, initializes onboarding, and queues welcome email
+        [HttpPost("{id}/Hire")]
+        [Authorize(Roles = "Admin,Executive,HRManager")]
+        public async Task<IActionResult> HireCandidate(int id, [FromBody] HireRequest request)
+        {
+            try
+            {
+                // Get the job application
+                var application = await _context.JobApplications.FindAsync(id);
+                if (application == null)
+                {
+                    return NotFound(new { message = "Application not found" });
+                }
+
+                // Check if already hired
+                if (application.Status == "Hired" || application.ApprovalStatus == "Hired")
+                {
+                    return BadRequest(new { message = "Candidate has already been hired" });
+                }
+
+                // Validate email uniqueness
+                if (await _context.Users.AnyAsync(u => u.Email == request.Email))
+                {
+                    return BadRequest(new { message = "Email already exists in the system" });
+                }
+
+                // Validate employee code uniqueness
+                if (await _context.Employees.AnyAsync(e => e.EmployeeCode == request.EmployeeCode))
+                {
+                    return BadRequest(new { message = "Employee code already exists" });
+                }
+
+                // Validate department
+                var department = await _context.Departments.FindAsync(request.DepartmentId);
+                if (department == null)
+                {
+                    return BadRequest(new { message = "Invalid department" });
+                }
+
+                // Validate role
+                var role = await _context.Roles.FindAsync(request.RoleId);
+                if (role == null)
+                {
+                    return BadRequest(new { message = "Invalid role" });
+                }
+
+                // Generate temporary password
+                var temporaryPassword = HRManagementAPI.Utilities.PasswordGenerator.GenerateTpaPassword();
+                var hashedPassword = BCrypt.Net.BCrypt.HashPassword(temporaryPassword);
+
+                // Create User account
+                var user = new User
+                {
+                    Email = request.Email,
+                    PasswordHash = hashedPassword,
+                    RoleId = request.RoleId,
+                    IsActive = true,
+                    AccountStatus = "PendingOnboarding",
+                    OnboardingStatus = "NotStarted",
+                    CreatedAt = DateTime.UtcNow
+                };
+
+                _context.Users.Add(user);
+                await _context.SaveChangesAsync(); // Save to get UserId
+
+                // Create Employee record
+                var employee = new Employee
+                {
+                    UserId = user.UserId,
+                    FirstName = application.FirstName,
+                    LastName = application.LastName,
+                    MiddleName = application.MiddleName,
+                    DateOfBirth = application.DateOfBirth,
+                    Gender = application.Gender,
+                    PhoneNumber = application.PhoneNumber,
+                    PersonalEmail = application.Email,
+                    Address = application.Address,
+                    City = application.City,
+                    State = application.State,
+                    ZipCode = application.ZipCode,
+                    Country = application.Country,
+                    EmergencyContactName = application.EmergencyContactPerson,
+                    EmergencyContactPhone = application.EmergencyContactPhone,
+                    EmergencyContactRelationship = application.EmergencyContactRelationship,
+                    EmployeeCode = request.EmployeeCode,
+                    DepartmentId = request.DepartmentId,
+                    JobTitle = request.JobTitle,
+                    EmployeeType = request.EmployeeType,
+                    EmploymentStatus = "Pending", // Will become "Active" after onboarding
+                    EmploymentType = request.EmploymentType ?? "Full-Time",
+                    HireDate = request.HireDate,
+                    Salary = request.Salary,
+                    ManagerId = request.ManagerId,
+                    IsActive = true,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                };
+
+                // Set PTO eligibility based on employee type
+                if (request.EmployeeType == "AdminStaff")
+                {
+                    employee.IsEligibleForPTO = true;
+                    employee.PTOBalance = 0;
+                    employee.IsEligibleForInsurance = true;
+                }
+
+                _context.Employees.Add(employee);
+                await _context.SaveChangesAsync(); // Save to get EmployeeId
+
+                // Initialize onboarding tasks
+                var tasks = await _context.OnboardingTasks
+                    .Where(t => t.IsActive &&
+                        (t.ApplicableEmployeeType == "Both" || t.ApplicableEmployeeType == employee.EmployeeType))
+                    .ToListAsync();
+
+                foreach (var task in tasks)
+                {
+                    var employeeTask = new EmployeeOnboardingTask
+                    {
+                        EmployeeId = employee.EmployeeId,
+                        TaskId = task.TaskId,
+                        AssignedDate = DateTime.UtcNow,
+                        DueDate = DateTime.UtcNow.AddDays(task.DefaultDueDays),
+                        Status = "Pending",
+                        CreatedAt = DateTime.UtcNow,
+                        UpdatedAt = DateTime.UtcNow
+                    };
+
+                    _context.EmployeeOnboardingTasks.Add(employeeTask);
+                }
+
+                await _context.SaveChangesAsync();
+
+                // Queue welcome email
+                var emailBody = $@"
+<html>
+<head>
+    <style>
+        body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
+        .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+        .header {{ background-color: #f59e42; color: white; padding: 20px; text-align: center; }}
+        .content {{ background-color: #f9f9f9; padding: 20px; margin-top: 20px; }}
+        .credentials {{ background-color: #fff; padding: 15px; border-left: 4px solid #f59e42; margin: 20px 0; }}
+        .button {{ display: inline-block; padding: 12px 24px; background-color: #f59e42; color: white; text-decoration: none; border-radius: 4px; margin: 20px 0; }}
+        .footer {{ margin-top: 30px; padding-top: 20px; border-top: 1px solid #ddd; font-size: 12px; color: #666; }}
+    </style>
+</head>
+<body>
+    <div class='container'>
+        <div class='header'>
+            <h1>Welcome to TPA!</h1>
+        </div>
+        <div class='content'>
+            <h2>Hi {application.FirstName},</h2>
+            <p>Congratulations! We're excited to have you join the TPA team as a <strong>{request.JobTitle}</strong> in the <strong>{department.DepartmentName}</strong> department.</p>
+
+            <p>Your account has been created. Here are your login credentials:</p>
+
+            <div class='credentials'>
+                <p><strong>Username:</strong> {request.Email}</p>
+                <p><strong>Temporary Password:</strong> {temporaryPassword}</p>
+                <p><strong>Start Date:</strong> {request.HireDate:MMMM dd, yyyy}</p>
+            </div>
+
+            <p><strong>⚠️ IMPORTANT:</strong> Please change your password after your first login for security.</p>
+
+            <h3>Next Steps:</h3>
+            <ol>
+                <li>Log in using the credentials above</li>
+                <li>Complete your onboarding tasks (estimated time: 30-45 minutes)</li>
+                <li>Once all required tasks are completed, you'll gain full access to the system</li>
+            </ol>
+
+            <p>You have been assigned <strong>{tasks.Count} onboarding tasks</strong> to complete. These include uploading documents, completing forms, and acknowledging company policies.</p>
+
+            <a href='http://localhost:3000/login' class='button'>Login Now</a>
+
+            <div class='footer'>
+                <p>If you have any questions, please contact HR at hr@tpa.com</p>
+                <p>Welcome aboard!</p>
+                <p><strong>The TPA HR Team</strong></p>
+            </div>
+        </div>
+    </div>
+</body>
+</html>";
+
+                var email = new EmailQueue
+                {
+                    ToEmail = request.Email,
+                    ToName = $"{application.FirstName} {application.LastName}",
+                    FromEmail = "hr@tpa.com",
+                    FromName = "TPA HR Team",
+                    Subject = "Welcome to TPA - Your Account Details",
+                    Body = emailBody,
+                    EmailType = "WelcomeEmail",
+                    Status = "Pending",
+                    Priority = 1, // High priority
+                    CreatedAt = DateTime.UtcNow
+                };
+
+                _context.EmailQueue.Add(email);
+
+                // Update application status
+                var userId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? "0");
+                application.Status = "Hired";
+                application.ApprovalStatus = "Hired";
+                application.ReviewedBy = userId;
+                application.ReviewedDate = DateTime.UtcNow;
+                application.LastModified = DateTime.UtcNow;
+
+                await _context.SaveChangesAsync();
+
+                return Ok(new
+                {
+                    message = "Candidate hired successfully",
+                    userId = user.UserId,
+                    employeeId = employee.EmployeeId,
+                    employeeCode = employee.EmployeeCode,
+                    email = user.Email,
+                    temporaryPassword = temporaryPassword, // Return for HR to communicate if needed
+                    onboardingTasksCreated = tasks.Count,
+                    welcomeEmailQueued = true
+                });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { message = "Error hiring candidate", error = ex.Message });
+            }
+        }
     }
 
     // DTO Classes
@@ -458,6 +690,20 @@ namespace HRManagementAPI.Controllers
     {
         public string ApprovalStatus { get; set; }
         public string? Notes { get; set; }
+    }
+
+    public class HireRequest
+    {
+        public string Email { get; set; }
+        public string EmployeeCode { get; set; }
+        public int DepartmentId { get; set; }
+        public string JobTitle { get; set; }
+        public string EmployeeType { get; set; } // AdminStaff or FieldStaff
+        public string? EmploymentType { get; set; } // Full-Time, Part-Time, Contract
+        public int RoleId { get; set; }
+        public DateTime HireDate { get; set; }
+        public decimal? Salary { get; set; }
+        public int? ManagerId { get; set; }
     }
     public class JobApplicationDto
     {

@@ -1,15 +1,59 @@
-﻿using Microsoft.EntityFrameworkCore;
+﻿using HRManagementAPI.Data;
+using HRManagementAPI.Middleware;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using System.Text;
-using HRManagementAPI.Data;
-using HRManagementAPI.Middleware;  
-
+using Serilog.Extensions.Logging.File;
 var builder = WebApplication.CreateBuilder(args);
+
+// ============================================
+// CONFIGURE FILE LOGGING
+// ============================================
+builder.Logging.ClearProviders(); // Clear default providers
+builder.Logging.AddConsole();     // Keep console logging
+builder.Logging.AddDebug();       // Keep debug logging
+
+// Add File Logging
+var logDirectory = Path.Combine(Directory.GetCurrentDirectory(), "Logs");
+if (!Directory.Exists(logDirectory))
+{
+    Directory.CreateDirectory(logDirectory);
+}
+
+var logFilePath = Path.Combine(logDirectory, $"errors-{DateTime.Now:yyyy-MM-dd}.txt");
+
+builder.Logging.AddFile(logFilePath, options =>
+{
+    options.MinLevel = LogLevel.Warning; // Log Warning, Error, and Critical
+    options.FileSizeLimitBytes = 10 * 1024 * 1024; // 10 MB per file
+    options.RetainedFileCountLimit = 30; // Keep 30 days of logs
+});
+
+// Alternative: Use Serilog (More Feature-Rich)
+// Uncomment the following if you want to use Serilog instead
+/*
+using Serilog;
+
+Log.Logger = new LoggerConfiguration()
+    .MinimumLevel.Warning()
+    .WriteTo.Console()
+    .WriteTo.File(
+        path: Path.Combine("Logs", "errors-.txt"),
+        rollingInterval: RollingInterval.Day,
+        retainedFileCountLimit: 30,
+        outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff} [{Level:u3}] {Message:lj}{NewLine}{Exception}"
+    )
+    .CreateLogger();
+
+builder.Host.UseSerilog();
+*/
 
 // Add services to the container.
 builder.Services.AddControllers();
+
 // Add CORS policy for React app
 builder.Services.AddCors(options =>
 {
@@ -22,7 +66,7 @@ builder.Services.AddCors(options =>
 });
 
 // Add HttpContextAccessor for accessing HTTP context in middleware
-builder.Services.AddHttpContextAccessor();  // ✅ ADD THIS LINE
+builder.Services.AddHttpContextAccessor();
 
 // Configure Entity Framework and SQL Server
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
@@ -92,6 +136,38 @@ builder.Services.AddSwaggerGen(options =>
 
 var app = builder.Build();
 
+// ============================================
+// GLOBAL EXCEPTION HANDLING MIDDLEWARE
+// ============================================
+app.UseExceptionHandler(errorApp =>
+{
+    errorApp.Run(async context =>
+    {
+        var logger = context.RequestServices.GetRequiredService<ILogger<Program>>();
+        var exceptionHandlerPathFeature = context.Features.Get<Microsoft.AspNetCore.Diagnostics.IExceptionHandlerPathFeature>();
+        var exception = exceptionHandlerPathFeature?.Error;
+
+        if (exception != null)
+        {
+            logger.LogError(exception,
+                "Unhandled exception occurred. Path: {Path}, Method: {Method}, User: {User}",
+                context.Request.Path,
+                context.Request.Method,
+                context.User?.Identity?.Name ?? "Anonymous");
+        }
+
+        context.Response.StatusCode = 500;
+        context.Response.ContentType = "application/json";
+
+        await context.Response.WriteAsJsonAsync(new
+        {
+            success = false,
+            message = "An internal server error occurred. Please contact support if the problem persists.",
+            timestamp = DateTime.UtcNow
+        });
+    });
+});
+
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
 {
@@ -108,9 +184,12 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 // Add Audit Logging Middleware (after authentication so we have user context)
-app.UseAuditLogging();  // ✅ ADD THIS LINE
-
+app.UseAuditLogging();
 
 app.MapControllers();
+
+// Log application startup
+var startupLogger = app.Services.GetRequiredService<ILogger<Program>>();
+startupLogger.LogInformation("HR Management API started at {Time}", DateTime.UtcNow);
 
 app.Run();

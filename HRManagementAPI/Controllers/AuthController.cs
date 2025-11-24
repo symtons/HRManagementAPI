@@ -172,7 +172,9 @@ namespace HRManagementAPI.Controllers
                         userId = user.UserId,
                         email = user.Email,
                         role = user.Role.RoleName,
-                        roleLevel = user.Role.RoleLevel
+                        roleLevel = user.Role.RoleLevel,
+                        accountStatus = user.AccountStatus,
+                        onboardingStatus = user.OnboardingStatus
                     },
                     employee = employee
                 });

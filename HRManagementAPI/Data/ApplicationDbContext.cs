@@ -27,5 +27,23 @@ namespace HRManagementAPI.Data
         public DbSet<JobApplication> JobApplications { get; set; }
         public DbSet<OnboardingTask> OnboardingTasks { get; set; }
         public DbSet<EmployeeOnboardingTask> EmployeeOnboardingTasks { get; set; }
+        public DbSet<EmailQueue> EmailQueue { get; set; }
+
+        // Time and Attendance
+        public DbSet<Shift> Shifts { get; set; }
+        public DbSet<EmployeeShift> EmployeeShifts { get; set; }
+        public DbSet<TimeEntry> TimeEntries { get; set; }
+        public DbSet<Attendance> Attendance { get; set; }
+        public DbSet<Timesheet> Timesheets { get; set; }
+        public DbSet<TimesheetEntry> TimesheetEntries { get; set; }
+        public DbSet<OvertimeRequest> OvertimeRequests { get; set; }
+
+        // Performance Management
+        public DbSet<ReviewCycle> ReviewCycles { get; set; }
+        public DbSet<PerformanceReview> PerformanceReviews { get; set; }
+        public DbSet<ReviewRating> ReviewRatings { get; set; }
+        public DbSet<Goal> Goals { get; set; }
+        public DbSet<GoalUpdate> GoalUpdates { get; set; }
+        public DbSet<Feedback> Feedback { get; set; }
     }
 }
