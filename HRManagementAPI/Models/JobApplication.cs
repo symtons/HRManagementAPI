@@ -17,13 +17,13 @@ namespace HRManagementAPI.Models
 
         public DateTime? ApplicationDate { get; set; }
 
-        [Required]
+        
         [StringLength(50)]
         public string FirstName { get; set; }
 
-        [Required]
+        
         [StringLength(50)]
-        public string LastName { get; set; }
+        public string? LastName { get; set; }
 
         [StringLength(50)]
         public string? MiddleName { get; set; }
@@ -36,35 +36,35 @@ namespace HRManagementAPI.Models
         [StringLength(20)]
         public string? Gender { get; set; }
 
-        [Required]
+        
         [StringLength(20)]
         public string PhoneNumber { get; set; }
 
         [StringLength(20)]
         public string? CellNumber { get; set; }
 
-        [Required]
+        
         [StringLength(100)]
-        public string Email { get; set; }
+        public string? Email { get; set; }
 
-        [Required]
+        
         [StringLength(200)]
-        public string Address { get; set; }
+        public string? Address { get; set; }
 
         [StringLength(20)]
         public string? AptNumber { get; set; }
 
-        [Required]
+        
         [StringLength(50)]
-        public string City { get; set; }
+        public  string? City { get; set; }
 
-        [Required]
+        
         [StringLength(2)]
-        public string State { get; set; }
+        public string? State { get; set; }
 
-        [Required]
+        
         [StringLength(10)]
-        public string ZipCode { get; set; }
+        public string? ZipCode { get; set; }
 
         [StringLength(50)]
         public string? Country { get; set; }
@@ -90,15 +90,8 @@ namespace HRManagementAPI.Models
         [StringLength(20)]
         public string? EmergencyContactPhone { get; set; }
 
-        // ADD THESE PROPERTIES TO YOUR JobApplication.cs MODEL
-        // Add them in the "STATUS & METADATA" section (around line 500-600)
-
-        // Find this section in your model:
-        // ================================================================
-        // STATUS & METADATA
-        // ================================================================
-
-        // ADD THESE MISSING PROPERTIES:
+        
+   
 
         [StringLength(50)]
         public string? ApprovalStatus { get; set; } = "Pending"; // Pending/Approved/Rejected
@@ -112,7 +105,7 @@ namespace HRManagementAPI.Models
 
         public DateTime? LastModified { get; set; }
 
-        // Also add these for future hiring workflow:
+        
         public int? EmployeeId { get; set; }
 
         public int? UserId { get; set; }
@@ -148,13 +141,11 @@ namespace HRManagementAPI.Models
         [ForeignKey("DepartmentId")]
         public virtual Department? Department { get; set; }
 
-        // ================================================================
-        // POSITION DETAILS
-        // ================================================================
+        
 
-        [Required]
+        
         [StringLength(100)]
-        public string PositionAppliedFor { get; set; }
+        public string? PositionAppliedFor { get; set; }
 
         [StringLength(100)]
         public string? Position2 { get; set; }
@@ -179,10 +170,7 @@ namespace HRManagementAPI.Models
 
         public string? DaysAvailable { get; set; } // JSON array
 
-        // ================================================================
-        // BACKGROUND QUESTIONS
-        // ================================================================
-
+       
         public bool? PreviouslyAppliedToTPA { get; set; }
 
         [StringLength(100)]
@@ -219,9 +207,6 @@ namespace HRManagementAPI.Models
 
         public bool? HealthcareLicenseIssues { get; set; }
 
-        // ================================================================
-        // EDUCATION
-        // ================================================================
 
         public string? EducationHistory { get; set; } // JSON array
 
@@ -253,7 +238,7 @@ namespace HRManagementAPI.Models
         // AUTHORIZATIONS
         // ================================================================
 
-        public bool BackgroundCheckConsent { get; set; }
+        public bool? BackgroundCheckConsent { get; set; }
 
         public DateTime? BackgroundCheckDate { get; set; }
 
@@ -266,7 +251,7 @@ namespace HRManagementAPI.Models
 
         public bool? CAApplicant { get; set; }
 
-        public bool ReferenceCheckConsent { get; set; }
+        public bool? ReferenceCheckConsent { get; set; }
 
         [StringLength(4)]
         public string? ReferenceCheckSSNLast4 { get; set; }
@@ -280,7 +265,7 @@ namespace HRManagementAPI.Models
 
         public bool? HasAbuseCaseAgainstMe { get; set; }
 
-        public bool DIDDAuthorizationConsent { get; set; }
+        public bool? DIDDAuthorizationConsent { get; set; }
 
         [StringLength(200)]
         public string? DIDDFullName { get; set; }
@@ -300,7 +285,7 @@ namespace HRManagementAPI.Models
 
         public bool? ProtectionHasAbuseCase { get; set; }
 
-        public bool ProtectionAuthorizationConsent { get; set; }
+        public bool? ProtectionAuthorizationConsent { get; set; }
 
         // ================================================================
         // STATUS & METADATA
@@ -317,9 +302,9 @@ namespace HRManagementAPI.Models
 
         public string? Notes { get; set; }
 
-        public DateTime CreatedAt { get; set; }
+        public DateTime? CreatedAt { get; set; }
 
-        public DateTime UpdatedAt { get; set; }
+        public DateTime? UpdatedAt { get; set; }
 
         // ================================================================
         // NAVIGATION PROPERTIES

@@ -6,7 +6,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using System.Text;
-using Serilog.Extensions.Logging.File;
+
 var builder = WebApplication.CreateBuilder(args);
 
 // ============================================
@@ -16,7 +16,7 @@ builder.Logging.ClearProviders(); // Clear default providers
 builder.Logging.AddConsole();     // Keep console logging
 builder.Logging.AddDebug();       // Keep debug logging
 
-// Add File Logging
+// Add File Logging - CORRECTED VERSION
 var logDirectory = Path.Combine(Directory.GetCurrentDirectory(), "Logs");
 if (!Directory.Exists(logDirectory))
 {
@@ -25,31 +25,8 @@ if (!Directory.Exists(logDirectory))
 
 var logFilePath = Path.Combine(logDirectory, $"errors-{DateTime.Now:yyyy-MM-dd}.txt");
 
-builder.Logging.AddFile(logFilePath, options =>
-{
-    options.MinLevel = LogLevel.Warning; // Log Warning, Error, and Critical
-    options.FileSizeLimitBytes = 10 * 1024 * 1024; // 10 MB per file
-    options.RetainedFileCountLimit = 30; // Keep 30 days of logs
-});
-
-// Alternative: Use Serilog (More Feature-Rich)
-// Uncomment the following if you want to use Serilog instead
-/*
-using Serilog;
-
-Log.Logger = new LoggerConfiguration()
-    .MinimumLevel.Warning()
-    .WriteTo.Console()
-    .WriteTo.File(
-        path: Path.Combine("Logs", "errors-.txt"),
-        rollingInterval: RollingInterval.Day,
-        retainedFileCountLimit: 30,
-        outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff} [{Level:u3}] {Message:lj}{NewLine}{Exception}"
-    )
-    .CreateLogger();
-
-builder.Host.UseSerilog();
-*/
+// Use the correct AddFile method signature
+builder.Logging.AddFile(logFilePath, minimumLevel: LogLevel.Warning);
 
 // Add services to the container.
 builder.Services.AddControllers();
@@ -59,7 +36,8 @@ builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowReactApp",
         policy => policy
-            .WithOrigins("http://localhost:3000")
+            .WithOrigins("http://localhost:3000",
+            "http://localhost:7144")
             .AllowAnyMethod()
             .AllowAnyHeader()
             .AllowCredentials());
@@ -136,9 +114,7 @@ builder.Services.AddSwaggerGen(options =>
 
 var app = builder.Build();
 
-// ============================================
-// GLOBAL EXCEPTION HANDLING MIDDLEWARE
-// ============================================
+
 app.UseExceptionHandler(errorApp =>
 {
     errorApp.Run(async context =>

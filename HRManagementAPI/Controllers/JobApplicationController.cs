@@ -268,24 +268,36 @@ namespace HRManagementAPI.Controllers
             });
         }
 
-        // 2. GET STATISTICS
+        // FIX: Add rejectedApplications to Statistics Endpoint
+        // Location: HRManagementAPI/Controllers/JobApplicationController.cs
+
+        // FIND the GetStatistics method (around line 200-220) and REPLACE it with this:
+
         [HttpGet("Statistics")]
         [Authorize(Roles = "Admin,Executive,HRManager")]
         public async Task<IActionResult> GetStatistics()
         {
             var totalApplications = await _context.JobApplications.CountAsync();
+
             var pendingApplications = await _context.JobApplications
                 .Where(a => a.ApprovalStatus == "Pending")
                 .CountAsync();
+
             var approvedApplications = await _context.JobApplications
                 .Where(a => a.ApprovalStatus == "Approved")
+                .CountAsync();
+
+            // ✅ ADD THIS - Count rejected applications
+            var rejectedApplications = await _context.JobApplications
+                .Where(a => a.ApprovalStatus == "Rejected")
                 .CountAsync();
 
             return Ok(new
             {
                 totalApplications,
                 pendingApplications,
-                approvedApplications
+                approvedApplications,
+                rejectedApplications  // ✅ ADD THIS LINE
             });
         }
 
@@ -335,37 +347,103 @@ namespace HRManagementAPI.Controllers
             await _context.SaveChangesAsync();
             return Ok(new { message = "Notes added" });
         }
-        // 1. REJECT APPLICATION ENDPOINT
+        // REPLACE THE REJECT ENDPOINT WITH THIS VERSION
+        // Location: HRManagementAPI/Controllers/JobApplicationController.cs
+
         [HttpPost("{id}/Reject")]
         [Authorize(Roles = "Admin,Executive,HRManager")]
         public async Task<IActionResult> RejectApplication(int id, [FromBody] RejectRequest request)
         {
             try
             {
+                // Log step 1
+                Console.WriteLine($"[DEBUG] RejectApplication called - ID: {id}");
+
+                // Check if request body is null
+                if (request == null)
+                {
+                    Console.WriteLine("[ERROR] Request body is NULL");
+                    return BadRequest(new { message = "Request body is required" });
+                }
+
+                Console.WriteLine($"[DEBUG] Request.RejectionReason: {request.RejectionReason}");
+
+                // Find application
                 var application = await _context.JobApplications.FindAsync(id);
+
                 if (application == null)
+                {
+                    Console.WriteLine($"[ERROR] Application not found - ID: {id}");
                     return NotFound(new { message = "Application not found" });
+                }
 
-                var userId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? "0");
+                Console.WriteLine($"[DEBUG] Application found - ID: {application.ApplicationId}");
 
-                application.ApprovalStatus = "Rejected";
-                application.Status = "Rejected";
-                application.RejectionReason = request.RejectionReason;
-                application.ReviewedBy = userId;
-                application.ReviewedDate = DateTime.UtcNow;
-                application.LastModified = DateTime.UtcNow;
+                // Get user ID
+                var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                Console.WriteLine($"[DEBUG] UserID Claim: {userIdClaim}");
 
+                var userId = int.Parse(userIdClaim ?? "0");
+                Console.WriteLine($"[DEBUG] Parsed UserID: {userId}");
+
+                // Set properties one by one with logging
+                try
+                {
+                    Console.WriteLine("[DEBUG] Setting ApprovalStatus...");
+                    application.ApprovalStatus = "Rejected";
+
+                    Console.WriteLine("[DEBUG] Setting Status...");
+                    application.Status = "Rejected";
+
+                    Console.WriteLine("[DEBUG] Setting RejectionReason...");
+                    application.RejectionReason = request.RejectionReason;
+
+                    Console.WriteLine("[DEBUG] Setting ReviewedBy...");
+                    application.ReviewedBy = userId;
+
+                    Console.WriteLine("[DEBUG] Setting ReviewedDate...");
+                    application.ReviewedDate = DateTime.UtcNow;
+
+                    Console.WriteLine("[DEBUG] Setting LastModified...");
+                    application.LastModified = DateTime.UtcNow;
+
+                    Console.WriteLine("[DEBUG] All properties set successfully");
+                }
+                catch (Exception propEx)
+                {
+                    Console.WriteLine($"[ERROR] Failed setting properties: {propEx.Message}");
+                    Console.WriteLine($"[ERROR] Stack trace: {propEx.StackTrace}");
+                    return StatusCode(500, new
+                    {
+                        message = "Error setting application properties",
+                        error = propEx.Message,
+                        stackTrace = propEx.StackTrace
+                    });
+                }
+
+                // Save changes
+                Console.WriteLine("[DEBUG] Calling SaveChangesAsync...");
                 await _context.SaveChangesAsync();
+                Console.WriteLine("[DEBUG] SaveChangesAsync completed successfully");
 
                 return Ok(new { message = "Application rejected successfully" });
             }
             catch (Exception ex)
             {
-                return StatusCode(500, new { message = "Error rejecting application", error = ex.Message });
+                Console.WriteLine($"[ERROR] Exception in RejectApplication: {ex.Message}");
+                Console.WriteLine($"[ERROR] Stack trace: {ex.StackTrace}");
+                Console.WriteLine($"[ERROR] Inner exception: {ex.InnerException?.Message}");
+
+                return StatusCode(500, new
+                {
+                    message = "Error rejecting application",
+                    error = ex.Message,
+                    innerError = ex.InnerException?.Message,
+                    stackTrace = ex.StackTrace
+                });
             }
         }
 
-      
 
         // 3. UPDATE APPROVAL STATUS ENDPOINT
         [HttpPut("{id}/Approval")]
