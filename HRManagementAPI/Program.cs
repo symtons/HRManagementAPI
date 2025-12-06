@@ -26,7 +26,7 @@ if (!Directory.Exists(logDirectory))
 var logFilePath = Path.Combine(logDirectory, $"errors-{DateTime.Now:yyyy-MM-dd}.txt");
 
 // Use the correct AddFile method signature
-builder.Logging.AddFile(logFilePath, minimumLevel: LogLevel.Warning);
+//builder.Logging.AddFile(logFilePath, minimumLevel: LogLevel.Warning);
 
 // Add services to the container.
 builder.Services.AddControllers();
@@ -36,11 +36,10 @@ builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowReactApp",
         policy => policy
-            .WithOrigins("http://localhost:3000",
-            "http://localhost:7144")
+            
+            .AllowAnyOrigin()
             .AllowAnyMethod()
-            .AllowAnyHeader()
-            .AllowCredentials());
+            .AllowAnyHeader());
 });
 
 // Add HttpContextAccessor for accessing HTTP context in middleware

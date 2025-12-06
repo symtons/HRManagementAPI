@@ -19,7 +19,7 @@ namespace HRManagementAPI.Models
 
         
         [StringLength(50)]
-        public string FirstName { get; set; }
+        public string? FirstName { get; set; }
 
         
         [StringLength(50)]
@@ -38,7 +38,7 @@ namespace HRManagementAPI.Models
 
         
         [StringLength(20)]
-        public string PhoneNumber { get; set; }
+        public string? PhoneNumber { get; set; }
 
         [StringLength(20)]
         public string? CellNumber { get; set; }
@@ -131,15 +131,15 @@ namespace HRManagementAPI.Models
         [StringLength(20)]
         public string? HomePhone { get; set; }
 
-        // Navigation properties at the bottom of the class:
-        [ForeignKey("EmployeeId")]
-        public virtual Employee? Employee { get; set; }
+        //// Navigation properties at the bottom of the class:
+        //[ForeignKey("EmployeeId")]
+        //public virtual Employee? Employee { get; set; }
 
-        [ForeignKey("UserId")]
-        public virtual User? User { get; set; }
+        //[ForeignKey("UserId")]
+        //public virtual User? User { get; set; }
 
-        [ForeignKey("DepartmentId")]
-        public virtual Department? Department { get; set; }
+        //[ForeignKey("DepartmentId")]
+        //public virtual Department? Department { get; set; }
 
         
 
