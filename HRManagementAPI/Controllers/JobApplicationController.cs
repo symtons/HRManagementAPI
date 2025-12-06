@@ -268,10 +268,110 @@ namespace HRManagementAPI.Controllers
             });
         }
 
-        // FIX: Add rejectedApplications to Statistics Endpoint
-        // Location: HRManagementAPI/Controllers/JobApplicationController.cs
 
-        // FIND the GetStatistics method (around line 200-220) and REPLACE it with this:
+        // POST: api/JobApplication/{id}/Approve
+        // ✅ NEW ENDPOINT - Approves application and creates user account
+        [HttpPost("{id}/Approve")]
+        [Authorize(Roles = "Admin,Executive,HRManager")]
+        public async Task<IActionResult> ApproveApplication(int id)
+        {
+            try
+            {
+                Console.WriteLine($"[DEBUG] ApproveApplication called - ID: {id}");
+
+                var application = await _context.JobApplications.FindAsync(id);
+                if (application == null)
+                {
+                    return NotFound(new { message = "Application not found" });
+                }
+
+                Console.WriteLine($"[DEBUG] Application found: {application.FirstName} {application.LastName}");
+
+                // Check if already approved
+                if (application.ApprovalStatus == "Approved")
+                {
+                    return BadRequest(new { message = "Application is already approved" });
+                }
+
+                // Generate email: firstname + first letter of surname @ tennesseepersonalassistance.org
+                var firstName = application.FirstName?.Trim().ToLower() ?? "";
+                var lastInitial = application.LastName?.Trim().ToLower().FirstOrDefault() ?? 'x';
+                var email = $"{firstName}{lastInitial}@tennesseepersonalassistance.org";
+
+                Console.WriteLine($"[DEBUG] Generated email: {email}");
+
+                // Check if email already exists
+                if (await _context.Users.AnyAsync(u => u.Email == email))
+                {
+                    return BadRequest(new { message = $"User with email {email} already exists" });
+                }
+
+                // Fixed password hash: $2a$11$HEEhR6V/vMkU9gFYZFLB2uNC8HAFtTYIy9a6ylR/fK3JfNqewsD0K
+                var passwordHash = "$2a$11$HEEhR6V/vMkU9gFYZFLB2uNC8HAFtTYIy9a6ylR/fK3JfNqewsD0K";
+
+                Console.WriteLine("[DEBUG] Creating user account...");
+
+                // Get Field Operator role (RoleId = 6)
+                var fieldOperatorRole = await _context.Roles
+                    .FirstOrDefaultAsync(r => r.RoleName == "FieldOperator");
+
+                if (fieldOperatorRole == null)
+                {
+                    return BadRequest(new { message = "FieldOperator role not found in system" });
+                }
+
+                // Create User account
+                var user = new User
+                {
+                    Email = email,
+                    PasswordHash = passwordHash,
+                    RoleId = fieldOperatorRole.RoleId,
+                    IsActive = true,
+                    AccountStatus = "Active",
+                    OnboardingStatus = "NotStarted",
+                    CreatedAt = DateTime.UtcNow
+                };
+
+                _context.Users.Add(user);
+                await _context.SaveChangesAsync();
+
+                Console.WriteLine($"[DEBUG] User created with ID: {user.UserId}");
+
+                // Update application
+                var userId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? "0");
+
+                application.ApprovalStatus = "Approved";
+                application.Status = "Approved";
+                application.ReviewedBy = userId;
+                application.ReviewedDate = DateTime.UtcNow;
+                application.LastModified = DateTime.UtcNow;
+                application.UserId = user.UserId; // Link to created user
+
+                await _context.SaveChangesAsync();
+
+                Console.WriteLine("[DEBUG] Application updated successfully");
+
+                return Ok(new
+                {
+                    message = "Application approved and user account created successfully",
+                    email = email,
+                    userId = user.UserId,
+                    note = "User can log in with the generated email and default password"
+                });
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[ERROR] Exception in ApproveApplication: {ex.Message}");
+                Console.WriteLine($"[ERROR] Stack trace: {ex.StackTrace}");
+
+                return StatusCode(500, new
+                {
+                    message = "Error approving application",
+                    error = ex.Message,
+                    innerError = ex.InnerException?.Message
+                });
+            }
+        }
 
         [HttpGet("Statistics")]
         [Authorize(Roles = "Admin,Executive,HRManager")]
