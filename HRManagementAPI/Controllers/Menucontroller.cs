@@ -19,11 +19,9 @@ namespace HRManagementAPI.Controllers
             _context = context;
         }
 
-        // UPDATED MenuController.cs - Restricts menus for users with OnboardingStatus = "NotStarted"
-        // Location: HRManagementAPI/Controllers/MenuController.cs
+        // UPDATED MenuController.cs - Add restriction for "InProgress" status
+        // Replace the GetMyMenus method in MenuController.cs
 
-        // GET: api/Menu/MyMenus
-        // Returns menu items for the logged-in user based on their role AND onboarding status
         [HttpGet("MyMenus")]
         public async Task<IActionResult> GetMyMenus()
         {
@@ -38,9 +36,7 @@ namespace HRManagementAPI.Controllers
 
             int userId = int.Parse(userIdClaim);
 
-            // ========================================
-            // ✅ NEW: Check user's onboarding status
-            // ========================================
+            // Check user's onboarding status
             var user = await _context.Users.FindAsync(userId);
 
             if (user == null)
@@ -48,15 +44,21 @@ namespace HRManagementAPI.Controllers
                 return NotFound(new { message = "User not found" });
             }
 
-            bool isOnboardingNotStarted = user.OnboardingStatus == "NotStarted";
+            // ========================================
+            // ✅ NEW: Handle both "NotStarted" AND "InProgress"
+            // ========================================
+            bool isOnboardingIncomplete = user.OnboardingStatus == "NotStarted" ||
+                                          user.OnboardingStatus == "InProgress";
 
-            // ========================================
-            // If onboarding not started, return ONLY Onboarding menu
-            // ========================================
-            if (isOnboardingNotStarted)
+            if (isOnboardingIncomplete)
             {
-                var onboardingMenu = await _context.MenuItems
-                    .Where(m => m.IsActive && m.IsVisible && m.MenuName == "Onboarding")
+                // Get only essential menus during onboarding
+                var onboardingMenus = await _context.MenuItems
+                    .Where(m => m.IsActive && m.IsVisible &&
+                           (m.MenuName == "Dashboard" ||
+                            m.MenuName == "Onboarding" ||
+                            m.MenuName == "Profile" ||
+                            m.MenuName == "Help"))
                     .Select(m => new MenuItemDto
                     {
                         MenuId = m.MenuId,
@@ -70,15 +72,18 @@ namespace HRManagementAPI.Controllers
                         CanCreate = false,
                         CanEdit = false,
                         CanDelete = false,
-                        SubMenus = new List<MenuItemDto>() // No sub-menus during onboarding
+                        SubMenus = new List<MenuItemDto>()
                     })
+                    .OrderBy(m => m.MenuOrder)
                     .ToListAsync();
 
                 return Ok(new
                 {
-                    menus = onboardingMenu,
+                    menus = onboardingMenus,
                     onboardingRequired = true,
-                    message = "Complete onboarding to access all features"
+                    message = user.OnboardingStatus == "NotStarted" ?
+                             "Complete onboarding to access all features" :
+                             "Complete all onboarding tasks to unlock full access"
                 });
             }
 

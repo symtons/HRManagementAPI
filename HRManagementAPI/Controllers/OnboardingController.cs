@@ -305,21 +305,87 @@ namespace HRManagementAPI.Controllers
                 return StatusCode(500, new { message = "Error initializing onboarding", error = ex.Message });
             }
         }
+        // ADD TO: HRManagementAPI/Controllers/OnboardingController.cs
+        // Add this method to allow HR to download employee uploads
 
+        // GET: api/Onboarding/Task/{taskId}/Download
+        // Download uploaded document for a task
+        [HttpGet("Task/{taskId}/Download")]
+        [Authorize(Roles = "Admin,Executive,Director")]  // Only HR can download
+        public async Task<IActionResult> DownloadTaskDocument(int taskId)
+        {
+            try
+            {
+                var task = await _context.EmployeeOnboardingTasks
+                    .FirstOrDefaultAsync(t => t.OnboardingTaskId == taskId);
+
+                if (task == null)
+                {
+                    return NotFound(new { message = "Task not found" });
+                }
+
+                if (string.IsNullOrEmpty(task.DocumentPath))
+                {
+                    return NotFound(new { message = "No document uploaded for this task" });
+                }
+
+                // Get full file path
+                var filePath = Path.Combine(_environment.WebRootPath ?? _environment.ContentRootPath, task.DocumentPath.TrimStart('/'));
+
+                if (!System.IO.File.Exists(filePath))
+                {
+                    return NotFound(new { message = "Document file not found on server" });
+                }
+
+                // Read file
+                var memory = new MemoryStream();
+                using (var stream = new FileStream(filePath, FileMode.Open))
+                {
+                    await stream.CopyToAsync(memory);
+                }
+                memory.Position = 0;
+
+                // Return file with original name
+                var contentType = GetContentType(task.DocumentOriginalName);
+                return File(memory, contentType, task.DocumentOriginalName);
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { message = "Error downloading document", error = ex.Message });
+            }
+        }
+
+        // Helper method to get content type
+        private string GetContentType(string fileName)
+        {
+            var extension = Path.GetExtension(fileName).ToLowerInvariant();
+            return extension switch
+            {
+                ".pdf" => "application/pdf",
+                ".doc" => "application/msword",
+                ".docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                ".jpg" or ".jpeg" => "image/jpeg",
+                ".png" => "image/png",
+                ".txt" => "text/plain",
+                _ => "application/octet-stream"
+            };
+        }
         // GET: api/Onboarding/Monitor
-        // HR gets all employees currently in onboarding
+        // HR gets all employees in onboarding (with proper null handling)
         [HttpGet("Monitor")]
         [Authorize(Roles = "Admin,Executive,Director")]
         public async Task<IActionResult> GetOnboardingMonitor()
         {
             try
             {
-                // Get all employees with onboarding status NotStarted or InProgress
+                // Get all employees with any onboarding status (includes Completed)
                 var employees = await _context.Employees
                     .Include(e => e.Department)
                     .Include(e => e.User)
                     .Where(e => e.User != null &&
-                        (e.User.OnboardingStatus == "NotStarted" || e.User.OnboardingStatus == "InProgress"))
+                        (e.User.OnboardingStatus == "NotStarted" ||
+                         e.User.OnboardingStatus == "InProgress" ||
+                         e.User.OnboardingStatus == "Completed"))
                     .Select(e => new
                     {
                         e.EmployeeId,
@@ -328,11 +394,12 @@ namespace HRManagementAPI.Controllers
                         e.LastName,
                         FullName = $"{e.FirstName} {e.LastName}",
                         e.JobTitle,
-                        Department = e.Department.DepartmentName,
+                        Department = e.Department != null ? e.Department.DepartmentName : "N/A",
                         e.HireDate,
                         Email = e.User.Email,
                         OnboardingStatus = e.User.OnboardingStatus,
-                        DaysSinceHire = (DateTime.UtcNow.Date - e.HireDate.Value.Date).Days
+                        OnboardingCompletedDate = e.User.OnboardingCompletedDate,
+                        DaysSinceHire = e.HireDate.HasValue ? (DateTime.UtcNow.Date - e.HireDate.Value.Date).Days : 0
                     })
                     .ToListAsync();
 
@@ -363,6 +430,7 @@ namespace HRManagementAPI.Controllers
                         emp.HireDate,
                         emp.Email,
                         emp.OnboardingStatus,
+                        emp.OnboardingCompletedDate,
                         emp.DaysSinceHire,
                         totalTasks,
                         completedTasks,

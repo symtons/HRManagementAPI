@@ -1,9 +1,10 @@
-﻿using Microsoft.AspNetCore.Authorization;
+﻿using HRManagementAPI.Data;
+using HRManagementAPI.Models;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.ComponentModel.DataAnnotations;
 using System.Security.Claims;
-using HRManagementAPI.Data;
-using HRManagementAPI.Models;
 
 namespace HRManagementAPI.Controllers
 {
@@ -19,16 +20,15 @@ namespace HRManagementAPI.Controllers
             _context = context;
         }
 
-        // GET: api/Employee/Directory
-        // Get employee directory with role-based filtering
         [HttpGet("Directory")]
         public async Task<IActionResult> GetEmployeeDirectory(
-            [FromQuery] string? search = null,
-            [FromQuery] int? departmentId = null,
-            [FromQuery] string? employeeType = null,
-            [FromQuery] string? employmentStatus = null,
-            [FromQuery] int pageNumber = 1,
-            [FromQuery] int pageSize = 10)
+             [FromQuery] string? search = null,
+             [FromQuery] int? departmentId = null,
+             [FromQuery] string? employeeType = null,
+             [FromQuery] string? employmentStatus = null,
+             [FromQuery][Range(1, int.MaxValue)] int pageNumber = 1,  // ✅ FIXED: Must be >= 1
+             
+             [FromQuery][Range(1, 100)] int pageSize = 10)
         {
             try
             {
@@ -102,11 +102,11 @@ namespace HRManagementAPI.Controllers
                 // Get total count before pagination
                 var totalCount = await query.CountAsync();
 
-                // Apply pagination
+                // Apply pagination - pageNumber is 1-based
                 var employees = await query
                     .OrderBy(e => e.LastName)
                     .ThenBy(e => e.FirstName)
-                    .Skip((pageNumber - 1) * pageSize)
+                    .Skip((pageNumber - 1) * pageSize)  // ✅ 1-based: (1-1)*10=0, (2-1)*10=10, etc.
                     .Take(pageSize)
                     .Select(e => new
                     {
@@ -152,6 +152,8 @@ namespace HRManagementAPI.Controllers
                 return StatusCode(500, new { message = "Error retrieving employees", error = ex.Message });
             }
         }
+
+
 
         // GET: api/Employee/{id}
         // Get single employee details
