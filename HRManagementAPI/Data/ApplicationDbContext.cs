@@ -45,5 +45,14 @@ namespace HRManagementAPI.Data
         public DbSet<Goal> Goals { get; set; }
         public DbSet<GoalUpdate> GoalUpdates { get; set; }
         public DbSet<Feedback> Feedback { get; set; }
+
+        protected override void OnModelCreating(ModelBuilder modelBuilder)
+        {
+            base.OnModelCreating(modelBuilder);
+
+            // Tell EF that JobApplications has a trigger
+            modelBuilder.Entity<JobApplication>()
+                .ToTable(tb => tb.HasTrigger("trg_CreateUserOnApproval"));
+        }
     }
 }

@@ -19,20 +19,72 @@ namespace HRManagementAPI.Controllers
             _context = context;
         }
 
+        // UPDATED MenuController.cs - Restricts menus for users with OnboardingStatus = "NotStarted"
+        // Location: HRManagementAPI/Controllers/MenuController.cs
+
         // GET: api/Menu/MyMenus
-        // Returns menu items for the logged-in user based on their role
+        // Returns menu items for the logged-in user based on their role AND onboarding status
         [HttpGet("MyMenus")]
         public async Task<IActionResult> GetMyMenus()
         {
-            // Get user's role from JWT token
+            // Get user ID and role from JWT token
+            var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
             var userRole = User.FindFirst(ClaimTypes.Role)?.Value;
 
-            if (string.IsNullOrEmpty(userRole))
+            if (string.IsNullOrEmpty(userRole) || string.IsNullOrEmpty(userIdClaim))
             {
-                return Unauthorized(new { message = "User role not found" });
+                return Unauthorized(new { message = "User authentication failed" });
             }
 
-            // Get role details
+            int userId = int.Parse(userIdClaim);
+
+            // ========================================
+            // ✅ NEW: Check user's onboarding status
+            // ========================================
+            var user = await _context.Users.FindAsync(userId);
+
+            if (user == null)
+            {
+                return NotFound(new { message = "User not found" });
+            }
+
+            bool isOnboardingNotStarted = user.OnboardingStatus == "NotStarted";
+
+            // ========================================
+            // If onboarding not started, return ONLY Onboarding menu
+            // ========================================
+            if (isOnboardingNotStarted)
+            {
+                var onboardingMenu = await _context.MenuItems
+                    .Where(m => m.IsActive && m.IsVisible && m.MenuName == "Onboarding")
+                    .Select(m => new MenuItemDto
+                    {
+                        MenuId = m.MenuId,
+                        ParentMenuId = m.ParentMenuId,
+                        MenuName = m.MenuName,
+                        MenuTitle = m.MenuTitle,
+                        MenuIcon = m.MenuIcon,
+                        MenuUrl = m.MenuUrl,
+                        MenuOrder = m.MenuOrder,
+                        CanView = true,
+                        CanCreate = false,
+                        CanEdit = false,
+                        CanDelete = false,
+                        SubMenus = new List<MenuItemDto>() // No sub-menus during onboarding
+                    })
+                    .ToListAsync();
+
+                return Ok(new
+                {
+                    menus = onboardingMenu,
+                    onboardingRequired = true,
+                    message = "Complete onboarding to access all features"
+                });
+            }
+
+            // ========================================
+            // Normal flow for users who completed onboarding
+            // ========================================
             var role = await _context.Roles.FirstOrDefaultAsync(r => r.RoleName == userRole);
 
             if (role == null)
@@ -40,7 +92,6 @@ namespace HRManagementAPI.Controllers
                 return NotFound(new { message = "Role not found" });
             }
 
-            // Get all menus for this role with permissions
             var menus = await _context.MenuItems
                 .Where(m => m.IsActive && m.IsVisible)
                 .Join(_context.RoleMenuPermissions,
@@ -65,10 +116,13 @@ namespace HRManagementAPI.Controllers
                 .OrderBy(m => m.MenuOrder)
                 .ToListAsync();
 
-            // Build hierarchical menu structure
             var hierarchicalMenus = BuildMenuHierarchy(menus);
 
-            return Ok(hierarchicalMenus);
+            return Ok(new
+            {
+                menus = hierarchicalMenus,
+                onboardingRequired = false
+            });
         }
 
         // GET: api/Menu/AllMenus
