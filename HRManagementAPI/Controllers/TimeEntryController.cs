@@ -1,3 +1,4 @@
+// HRManagementAPI/Controllers/TimeEntryController.cs
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -174,7 +175,7 @@ namespace HRManagementAPI.Controllers
                 timeEntry.TotalHours = Math.Round((decimal)(workMinutes / 60), 2);
 
                 // Calculate regular and overtime hours
-                var expectedHours = timeEntry.Shift?.WorkingHours ?? 8m;
+                var expectedHours = timeEntry.Shift?.WorkingHours ?? 8;
                 if (timeEntry.TotalHours <= expectedHours)
                 {
                     timeEntry.RegularHours = timeEntry.TotalHours;
@@ -186,8 +187,6 @@ namespace HRManagementAPI.Controllers
                     timeEntry.OvertimeHours = timeEntry.TotalHours - expectedHours;
                 }
 
-                timeEntry.UpdatedAt = DateTime.UtcNow;
-
                 // Update attendance
                 var attendance = await _context.Attendance
                     .FirstOrDefaultAsync(a => a.EmployeeId == employeeId && a.AttendanceDate.Date == today);
@@ -196,19 +195,6 @@ namespace HRManagementAPI.Controllers
                 {
                     attendance.ClockOutTime = timeEntry.ClockOutTime;
                     attendance.WorkingHours = timeEntry.TotalHours;
-
-                    // Check early leave
-                    if (timeEntry.Shift != null)
-                    {
-                        var shiftEndTime = today.Add(timeEntry.Shift.EndTime);
-                        if (timeEntry.ClockOutTime < shiftEndTime.AddMinutes(-15)) // 15 min grace period
-                        {
-                            attendance.IsEarlyLeave = true;
-                            attendance.EarlyLeaveMinutes = (int)(shiftEndTime - timeEntry.ClockOutTime.Value).TotalMinutes;
-                        }
-                    }
-
-                    attendance.UpdatedAt = DateTime.UtcNow;
                 }
 
                 await _context.SaveChangesAsync();
@@ -223,14 +209,135 @@ namespace HRManagementAPI.Controllers
                         timeEntry.ClockOutTime,
                         timeEntry.TotalHours,
                         timeEntry.RegularHours,
-                        timeEntry.OvertimeHours,
-                        isEarlyLeave = attendance?.IsEarlyLeave ?? false
-                    }
+                        timeEntry.OvertimeHours
+                    },
+                    hasOvertime = timeEntry.OvertimeHours > 0
                 });
             }
             catch (Exception ex)
             {
                 return StatusCode(500, new { message = "Error clocking out", error = ex.Message });
+            }
+        }
+
+        // ============================================
+        // MANUAL TIME ENTRY
+        // ============================================
+        [HttpPost("Manual")]
+        public async Task<IActionResult> ManualTimeEntry([FromBody] ManualTimeEntryRequest request)
+        {
+            try
+            {
+                var userId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? "0");
+                var user = await _context.Users
+                    .Include(u => u.Employee)
+                    .FirstOrDefaultAsync(u => u.UserId == userId);
+
+                if (user?.Employee == null)
+                {
+                    return BadRequest(new { message = "Employee record not found" });
+                }
+
+                var employeeId = user.Employee.EmployeeId;
+                var workDate = DateTime.Parse(request.WorkDate);
+
+                // Check if entry already exists for this date
+                var existingEntry = await _context.TimeEntries
+                    .FirstOrDefaultAsync(t => t.EmployeeId == employeeId &&
+                                             t.WorkDate.Date == workDate.Date);
+
+                if (existingEntry != null)
+                {
+                    return BadRequest(new { message = "A time entry already exists for this date. Please delete it first if you want to replace it." });
+                }
+
+                // Parse times
+                var clockIn = DateTime.Parse(request.ClockInTime);
+                var clockOut = DateTime.Parse(request.ClockOutTime);
+
+                // Validate times
+                if (clockOut <= clockIn)
+                {
+                    return BadRequest(new { message = "Clock out time must be after clock in time" });
+                }
+
+                // Get employee's shift for this date
+                var employeeShift = await _context.EmployeeShifts
+                    .Include(es => es.Shift)
+                    .Where(es => es.EmployeeId == employeeId &&
+                                es.IsActive &&
+                                es.EffectiveDate <= workDate &&
+                                (es.EndDate == null || es.EndDate >= workDate))
+                    .OrderByDescending(es => es.EffectiveDate)
+                    .FirstOrDefaultAsync();
+
+                // Create time entry
+                var timeEntry = new TimeEntry
+                {
+                    EmployeeId = employeeId,
+                    WorkDate = workDate,
+                    ClockInTime = clockIn,
+                    ClockOutTime = clockOut,
+                    ShiftId = employeeShift?.ShiftId,
+                    BreakMinutes = request.BreakMinutes ?? 0,
+                    Notes = request.Notes ?? "Manual entry",
+                    Status = "Closed"
+                };
+
+                // Calculate hours
+                var totalMinutes = (clockOut - clockIn).TotalMinutes;
+                var workMinutes = totalMinutes - timeEntry.BreakMinutes;
+                timeEntry.TotalHours = Math.Round((decimal)(workMinutes / 60), 2);
+
+                // Calculate regular and overtime
+                var expectedHours = employeeShift?.Shift?.WorkingHours ?? 8;
+                if (timeEntry.TotalHours <= expectedHours)
+                {
+                    timeEntry.RegularHours = timeEntry.TotalHours;
+                    timeEntry.OvertimeHours = 0;
+                }
+                else
+                {
+                    timeEntry.RegularHours = expectedHours;
+                    timeEntry.OvertimeHours = timeEntry.TotalHours - expectedHours;
+                }
+
+                _context.TimeEntries.Add(timeEntry);
+
+                // Create attendance record
+                var attendance = new Attendance
+                {
+                    EmployeeId = employeeId,
+                    AttendanceDate = workDate,
+                    ClockInTime = clockIn,
+                    ClockOutTime = clockOut,
+                    Status = "Present",
+                    WorkingHours = timeEntry.TotalHours,
+                    IsLate = false,
+                    Remarks = "Manual entry: " + (request.Notes ?? "")
+                };
+
+                _context.Attendance.Add(attendance);
+                await _context.SaveChangesAsync();
+
+                return Ok(new
+                {
+                    message = "Manual time entry created successfully",
+                    timeEntry = new
+                    {
+                        timeEntry.TimeEntryId,
+                        timeEntry.WorkDate,
+                        timeEntry.ClockInTime,
+                        timeEntry.ClockOutTime,
+                        timeEntry.TotalHours,
+                        timeEntry.RegularHours,
+                        timeEntry.OvertimeHours
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { message = "Error creating manual entry", error = ex.Message });
             }
         }
 
@@ -306,13 +413,12 @@ namespace HRManagementAPI.Controllers
                     return BadRequest(new { message = "Employee record not found" });
                 }
 
-                var employeeId = user.Employee.EmployeeId;
                 var start = startDate ?? DateTime.Today.AddDays(-30);
                 var end = endDate ?? DateTime.Today;
 
                 var entries = await _context.TimeEntries
                     .Include(t => t.Shift)
-                    .Where(t => t.EmployeeId == employeeId &&
+                    .Where(t => t.EmployeeId == user.Employee.EmployeeId &&
                                t.WorkDate >= start &&
                                t.WorkDate <= end)
                     .OrderByDescending(t => t.WorkDate)
@@ -325,6 +431,7 @@ namespace HRManagementAPI.Controllers
                         t.TotalHours,
                         t.RegularHours,
                         t.OvertimeHours,
+                        t.BreakMinutes,
                         t.Status,
                         shift = t.Shift != null ? t.Shift.ShiftName : null
                     })
@@ -334,12 +441,77 @@ namespace HRManagementAPI.Controllers
             }
             catch (Exception ex)
             {
-                return StatusCode(500, new { message = "Error retrieving time entries", error = ex.Message });
+                return StatusCode(500, new { message = "Error retrieving entries", error = ex.Message });
+            }
+        }
+
+        // Add this endpoint to TimeEntryController.cs
+        // Place it after the GetAllTimeEntries method (around line 540)
+
+        // ============================================
+        // DELETE TIME ENTRY
+        // ============================================
+        [HttpDelete("{id}")]
+        public async Task<IActionResult> DeleteTimeEntry(int id)
+        {
+            try
+            {
+                var userId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? "0");
+                var user = await _context.Users
+                    .Include(u => u.Employee)
+                    .FirstOrDefaultAsync(u => u.UserId == userId);
+
+                if (user?.Employee == null)
+                {
+                    return BadRequest(new { message = "Employee record not found" });
+                }
+
+                var timeEntry = await _context.TimeEntries
+                    .FirstOrDefaultAsync(t => t.TimeEntryId == id);
+
+                if (timeEntry == null)
+                {
+                    return NotFound(new { message = "Time entry not found" });
+                }
+
+                // Check if user owns this entry (or is admin)
+                var userRoles = User.FindAll(ClaimTypes.Role).Select(c => c.Value).ToList();
+                var isAdmin = userRoles.Contains("Admin") || userRoles.Contains("Executive");
+
+                if (timeEntry.EmployeeId != user.Employee.EmployeeId && !isAdmin)
+                {
+                    return Forbid();
+                }
+
+                // Don't allow deletion of entries older than 7 days (unless admin)
+                if (!isAdmin && (DateTime.Today - timeEntry.WorkDate.Date).TotalDays > 14)
+                {
+                    return BadRequest(new { message = "Cannot delete time entries older than 14 days" });
+                }
+
+                // Delete related attendance record
+                var attendance = await _context.Attendance
+                    .FirstOrDefaultAsync(a => a.EmployeeId == timeEntry.EmployeeId &&
+                                             a.AttendanceDate.Date == timeEntry.WorkDate.Date);
+
+                if (attendance != null)
+                {
+                    _context.Attendance.Remove(attendance);
+                }
+
+                _context.TimeEntries.Remove(timeEntry);
+                await _context.SaveChangesAsync();
+
+                return Ok(new { message = "Time entry deleted successfully" });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { message = "Error deleting time entry", error = ex.Message });
             }
         }
 
         // ============================================
-        // GET ALL TIME ENTRIES (Manager/Admin)
+        // GET ALL TIME ENTRIES (Admin)
         // ============================================
         [HttpGet("All")]
         [Authorize(Roles = "Admin,Executive,Director")]
@@ -410,5 +582,14 @@ namespace HRManagementAPI.Controllers
     {
         public string? Location { get; set; }
         public int? BreakMinutes { get; set; }
+    }
+
+    public class ManualTimeEntryRequest
+    {
+        public string WorkDate { get; set; } = string.Empty;
+        public string ClockInTime { get; set; } = string.Empty;
+        public string ClockOutTime { get; set; } = string.Empty;
+        public int? BreakMinutes { get; set; }
+        public string? Notes { get; set; }
     }
 }

@@ -1,4 +1,5 @@
-﻿using Microsoft.AspNetCore.Mvc;
+﻿// HRManagementAPI/Controllers/AuthController.cs
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using System.IdentityModel.Tokens.Jwt;
@@ -66,7 +67,10 @@ namespace HRManagementAPI.Controllers
                 PasswordHash = hashedPassword,
                 RoleId = request.RoleId,
                 IsActive = true,
-                CreatedAt = DateTime.UtcNow
+                CreatedAt = DateTime.UtcNow,
+                OnboardingStatus = "Completed", // ✅ Set to Completed for Add Employee
+                OnboardingCompletedDate = DateTime.UtcNow, // ✅ Set completion date
+                AccountStatus = "Active" // ✅ Set account to Active
             };
 
             _context.Users.Add(user);
@@ -81,11 +85,13 @@ namespace HRManagementAPI.Controllers
                 EmployeeCode = request.EmployeeCode,
                 DepartmentId = request.DepartmentId,
                 EmployeeType = request.EmployeeType,
+                EmploymentType = request.EmploymentType ?? "Full-Time",
                 JobTitle = request.JobTitle,
                 HireDate = request.HireDate ?? DateTime.UtcNow,
                 EmploymentStatus = "Active",
                 IsActive = true,
-                CreatedAt = DateTime.UtcNow
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
             };
 
             // Set PTO eligibility based on EmployeeType
@@ -106,7 +112,8 @@ namespace HRManagementAPI.Controllers
                 employeeId = employee.EmployeeId,
                 email = user.Email,
                 employeeCode = employee.EmployeeCode,
-                role = role.RoleName
+                role = role.RoleName,
+                onboardingStatus = user.OnboardingStatus
             });
         }
 
@@ -207,7 +214,6 @@ namespace HRManagementAPI.Controllers
         }
 
         // Private method to generate JWT token
-        // Private method to generate JWT token
         private string GenerateJwtToken(User user, dynamic employee)
         {
             var jwtSettings = _configuration.GetSection("JwtSettings");
@@ -221,14 +227,14 @@ namespace HRManagementAPI.Controllers
 
             // Create claims
             var claims = new List<Claim>
-    {
-        new Claim(ClaimTypes.NameIdentifier, user.UserId.ToString()),
-        new Claim(JwtRegisteredClaimNames.Sub, user.UserId.ToString()),
-        new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
-        new Claim(ClaimTypes.Email, user.Email),
-        new Claim(ClaimTypes.Role, user.Role.RoleName),
-        new Claim("RoleLevel", user.Role.RoleLevel.ToString())
-    };
+            {
+                new Claim(ClaimTypes.NameIdentifier, user.UserId.ToString()),
+                new Claim(JwtRegisteredClaimNames.Sub, user.UserId.ToString()),
+                new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
+                new Claim(ClaimTypes.Email, user.Email),
+                new Claim(ClaimTypes.Role, user.Role.RoleName),
+                new Claim("RoleLevel", user.Role.RoleLevel.ToString())
+            };
 
             // Add employee claims if employee exists
             if (employee != null)
@@ -274,6 +280,7 @@ namespace HRManagementAPI.Controllers
         public string EmployeeCode { get; set; }
         public int? DepartmentId { get; set; }
         public string EmployeeType { get; set; } // AdminStaff or FieldStaff
+        public string EmploymentType { get; set; } = "Full-Time";
         public string? JobTitle { get; set; }
         public DateTime? HireDate { get; set; }
     }
