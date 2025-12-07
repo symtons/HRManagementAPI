@@ -50,11 +50,180 @@ namespace HRManagementAPI.Controllers
         }
 
         // ============================================
-        // GET MY TIMESHEETS (Employee View)
+        // CLOCK IN
         // ============================================
-        [HttpGet("MyTimesheets")]
-        public async Task<IActionResult> GetMyTimesheets(
-            [FromQuery] string? status = null,
+        [HttpPost("ClockIn")]
+        public async Task<IActionResult> ClockIn([FromBody] ClockInRequest? request = null)
+        {
+            try
+            {
+                var employee = await GetCurrentEmployee();
+                if (employee == null)
+                {
+                    return BadRequest(new { message = "Employee record not found" });
+                }
+
+                // Check if already clocked in
+                var existingEntry = await _dbContext.TimeEntries
+                    .FirstOrDefaultAsync(t =>
+                        t.EmployeeId == employee.EmployeeId &&
+                        t.WorkDate == DateTime.UtcNow.Date &&
+                        t.Status == "Open");
+
+                if (existingEntry != null)
+                {
+                    return BadRequest(new { message = "Already clocked in" });
+                }
+
+                // Create new time entry
+                var timeEntry = new TimeEntry
+                {
+                    EmployeeId = employee.EmployeeId,
+                    WorkDate = DateTime.UtcNow.Date,
+                    ClockInTime = DateTime.UtcNow,
+                    ClockInLocation = request?.Location,
+                    Notes = request?.Notes,
+                    Status = "Open",
+                    CreatedAt = DateTime.UtcNow
+                };
+
+                _dbContext.TimeEntries.Add(timeEntry);
+                await _dbContext.SaveChangesAsync();
+
+                return Ok(new
+                {
+                    message = "Clocked in successfully",
+                    timeEntry = new
+                    {
+                        timeEntryId = timeEntry.TimeEntryId,
+                        clockInTime = timeEntry.ClockInTime,
+                        workDate = timeEntry.WorkDate
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { message = "Error clocking in", error = ex.Message });
+            }
+        }
+
+        // ============================================
+        // CLOCK OUT
+        // ============================================
+        [HttpPost("ClockOut")]
+        public async Task<IActionResult> ClockOut([FromBody] ClockOutRequest? request = null)
+        {
+            try
+            {
+                var employee = await GetCurrentEmployee();
+                if (employee == null)
+                {
+                    return BadRequest(new { message = "Employee record not found" });
+                }
+
+                // Find open time entry
+                var timeEntry = await _dbContext.TimeEntries
+                    .FirstOrDefaultAsync(t =>
+                        t.EmployeeId == employee.EmployeeId &&
+                        t.WorkDate == DateTime.UtcNow.Date &&
+                        t.Status == "Open");
+
+                if (timeEntry == null)
+                {
+                    return BadRequest(new { message = "No open time entry found. Please clock in first." });
+                }
+
+                // Update time entry
+                var clockOutTime = DateTime.UtcNow;
+                timeEntry.ClockOutTime = clockOutTime;
+                timeEntry.ClockOutLocation = request?.Location;
+                timeEntry.BreakMinutes = request?.BreakMinutes ?? 0;
+
+                // Calculate hours
+                var workDuration = clockOutTime - timeEntry.ClockInTime;
+                var totalMinutes = workDuration.TotalMinutes - timeEntry.BreakMinutes;
+                var totalHours = Math.Round(totalMinutes / 60.0, 2);
+
+                // Calculate regular and overtime
+                var regularHours = Math.Min(totalHours, 8);
+                var overtimeHours = Math.Max(0, totalHours - 8);
+
+                timeEntry.TotalHours = (decimal)totalHours;
+                timeEntry.RegularHours = (decimal)regularHours;
+                timeEntry.OvertimeHours = (decimal)overtimeHours;
+                timeEntry.Status = "Closed";
+                timeEntry.UpdatedAt = DateTime.UtcNow;
+
+                await _dbContext.SaveChangesAsync();
+
+                return Ok(new
+                {
+                    message = "Clocked out successfully",
+                    timeEntry = new
+                    {
+                        timeEntryId = timeEntry.TimeEntryId,
+                        clockInTime = timeEntry.ClockInTime,
+                        clockOutTime = timeEntry.ClockOutTime,
+                        totalHours = timeEntry.TotalHours,
+                        regularHours = timeEntry.RegularHours,
+                        overtimeHours = timeEntry.OvertimeHours,
+                        breakMinutes = timeEntry.BreakMinutes
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { message = "Error clocking out", error = ex.Message });
+            }
+        }
+
+        // ============================================
+        // GET CURRENT STATUS
+        // ============================================
+        [HttpGet("CurrentStatus")]
+        public async Task<IActionResult> GetCurrentStatus()
+        {
+            try
+            {
+                var employee = await GetCurrentEmployee();
+                if (employee == null)
+                {
+                    return BadRequest(new { message = "Employee record not found" });
+                }
+
+                // Check for open time entry
+                var openEntry = await _dbContext.TimeEntries
+                    .FirstOrDefaultAsync(t =>
+                        t.EmployeeId == employee.EmployeeId &&
+                        t.WorkDate == DateTime.UtcNow.Date &&
+                        t.Status == "Open");
+
+                var isClockedIn = openEntry != null;
+
+                return Ok(new
+                {
+                    isClockedIn,
+                    timeEntry = isClockedIn ? new
+                    {
+                        timeEntryId = openEntry!.TimeEntryId,
+                        clockInTime = openEntry.ClockInTime,
+                        workDate = openEntry.WorkDate,
+                        clockInLocation = openEntry.ClockInLocation,
+                        notes = openEntry.Notes
+                    } : null
+                });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { message = "Error getting status", error = ex.Message });
+            }
+        }
+
+        // ============================================
+        // GET MY ENTRIES
+        // ============================================
+        [HttpGet("MyEntries")]
+        public async Task<IActionResult> GetMyTimeEntries(
             [FromQuery] DateTime? startDate = null,
             [FromQuery] DateTime? endDate = null)
         {
@@ -66,240 +235,148 @@ namespace HRManagementAPI.Controllers
                     return BadRequest(new { message = "Employee record not found" });
                 }
 
-                var query = _dbContext.Timesheets
+                var query = _dbContext.TimeEntries
                     .Where(t => t.EmployeeId == employee.EmployeeId);
 
-                // Filter by status
+                if (startDate.HasValue)
+                {
+                    query = query.Where(t => t.WorkDate >= startDate.Value.Date);
+                }
+
+                if (endDate.HasValue)
+                {
+                    query = query.Where(t => t.WorkDate <= endDate.Value.Date);
+                }
+
+                var entries = await query
+                    .OrderByDescending(t => t.WorkDate)
+                    .ThenByDescending(t => t.ClockInTime)
+                    .Select(t => new
+                    {
+                        t.TimeEntryId,
+                        t.WorkDate,
+                        t.ClockInTime,
+                        t.ClockOutTime,
+                        t.TotalHours,
+                        t.RegularHours,
+                        t.OvertimeHours,
+                        t.BreakMinutes,
+                        t.Status,
+                        t.ClockInLocation,
+                        t.ClockOutLocation,
+                        t.Notes
+                    })
+                    .ToListAsync();
+
+                return Ok(entries);
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { message = "Error retrieving time entries", error = ex.Message });
+            }
+        }
+
+        // ============================================
+        // GET ALL ENTRIES (Admin/Director)
+        // ============================================
+        [HttpGet("All")]
+        public async Task<IActionResult> GetAllTimeEntries(
+            [FromQuery] int? departmentId = null,
+            [FromQuery] int? employeeId = null,
+            [FromQuery] DateTime? startDate = null,
+            [FromQuery] DateTime? endDate = null,
+            [FromQuery] string? status = null)
+        {
+            try
+            {
+                var employee = await GetCurrentEmployee();
+                if (employee == null)
+                {
+                    return BadRequest(new { message = "Employee record not found" });
+                }
+
+                var roles = GetUserRoles();
+                var isAdminOrExec = roles.Contains("Admin") || roles.Contains("Executive");
+                var isDirector = roles.Contains("Director");
+
+                var query = _dbContext.TimeEntries
+                    .Include(t => t.Employee)
+                        .ThenInclude(e => e.Department)
+                    .AsQueryable();
+
+                // Role-based filtering
+                if (isDirector && !isAdminOrExec)
+                {
+                    query = query.Where(t => t.Employee!.DepartmentId == employee.DepartmentId);
+                }
+                else if (!isAdminOrExec)
+                {
+                    return Forbid();
+                }
+
+                // Apply filters
+                if (departmentId.HasValue)
+                {
+                    query = query.Where(t => t.Employee!.DepartmentId == departmentId.Value);
+                }
+
+                if (employeeId.HasValue)
+                {
+                    query = query.Where(t => t.EmployeeId == employeeId.Value);
+                }
+
+                if (startDate.HasValue)
+                {
+                    query = query.Where(t => t.WorkDate >= startDate.Value.Date);
+                }
+
+                if (endDate.HasValue)
+                {
+                    query = query.Where(t => t.WorkDate <= endDate.Value.Date);
+                }
+
                 if (!string.IsNullOrEmpty(status))
                 {
                     query = query.Where(t => t.Status == status);
                 }
 
-                // Filter by date range
-                if (startDate.HasValue)
-                {
-                    query = query.Where(t => t.StartDate >= startDate.Value);
-                }
-                if (endDate.HasValue)
-                {
-                    query = query.Where(t => t.EndDate <= endDate.Value);
-                }
-
-                var timesheets = await query
-                    .OrderByDescending(t => t.StartDate)
+                var entries = await query
+                    .OrderByDescending(t => t.WorkDate)
+                    .ThenByDescending(t => t.ClockInTime)
                     .Select(t => new
                     {
-                        t.TimesheetId,
-                        t.StartDate,
-                        t.EndDate,
-                        t.TotalHours,
-                        t.RegularHours,
-                        t.OvertimeHours,
-                        t.Status,
-                        t.SubmittedAt,
-                        t.ApprovedAt,
-                        t.RejectionReason,
-                        ApprovedByName = t.ApprovedBy != null
-                            ? _dbContext.Users
-                                .Where(u => u.UserId == t.ApprovedBy)
-                                .Select(u => u.Employee.FirstName + " " + u.Employee.LastName)
-                                .FirstOrDefault()
-                            : null,
-                        EntryCount = t.TimesheetEntries.Count
-                    })
-                    .ToListAsync();
-
-                return Ok(timesheets);
-            }
-            catch (Exception ex)
-            {
-                return StatusCode(500, new { message = "Error retrieving timesheets", error = ex.Message });
-            }
-        }
-
-        // ============================================
-        // GET TIMESHEET DETAILS (with daily breakdown)
-        // ============================================
-        [HttpGet("{id}")]
-        public async Task<IActionResult> GetTimesheetDetails(int id)
-        {
-            try
-            {
-                var userId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? "0");
-                var user = await _dbContext.Users
-                    .Include(u => u.Employee)
-                    .FirstOrDefaultAsync(u => u.UserId == userId);
-
-                if (user?.Employee == null)
-                {
-                    return BadRequest(new { message = "Employee record not found" });
-                }
-
-                var timesheet = await _dbContext.Timesheets
-                    .Include(t => t.Employee)
-                        .ThenInclude(e => e.Department)
-                    .Include(t => t.TimesheetEntries)
-                        .ThenInclude(te => te.TimeEntry)
-                    .FirstOrDefaultAsync(t => t.TimesheetId == id);
-
-                if (timesheet == null)
-                {
-                    return NotFound(new { message = "Timesheet not found" });
-                }
-
-                // Authorization check
-                var roles = GetUserRoles();
-                var isAdminOrExec = roles.Contains("Admin") || roles.Contains("Executive");
-                var isDirector = roles.Contains("Director");
-                var isOwner = timesheet.EmployeeId == user.Employee.EmployeeId;
-                var isSameDepartment = isDirector && timesheet.Employee.DepartmentId == user.Employee.DepartmentId;
-
-                if (!isOwner && !isAdminOrExec && !isSameDepartment)
-                {
-                    return Forbid();
-                }
-
-                // Build response
-                var response = new
-                {
-                    timesheet.TimesheetId,
-                    timesheet.EmployeeId,
-                    EmployeeName = $"{timesheet.Employee.FirstName} {timesheet.Employee.LastName}",
-                    timesheet.Employee.EmployeeCode,
-                    timesheet.Employee.JobTitle,
-                    DepartmentName = timesheet.Employee.Department?.DepartmentName,
-                    timesheet.StartDate,
-                    timesheet.EndDate,
-                    timesheet.TotalHours,
-                    timesheet.RegularHours,
-                    timesheet.OvertimeHours,
-                    timesheet.Status,
-                    timesheet.SubmittedAt,
-                    timesheet.ApprovedAt,
-                    timesheet.RejectionReason,
-                    ApprovedByName = timesheet.ApprovedBy != null
-                        ? await _dbContext.Users
-                            .Where(u => u.UserId == timesheet.ApprovedBy)
-                            .Select(u => u.Employee.FirstName + " " + u.Employee.LastName)
-                            .FirstOrDefaultAsync()
-                        : null,
-                    Entries = timesheet.TimesheetEntries
-                        .OrderBy(e => e.WorkDate)
-                        .Select(e => new
-                        {
-                            e.TimesheetEntryId,
-                            e.WorkDate,
-                            e.StartTime,
-                            e.EndTime,
-                            e.Hours,
-                            e.TaskDescription,
-                            e.IsBillable,
-                            // Include actual clock in/out if linked
-                            ActualClockIn = e.TimeEntry?.ClockInTime,
-                            ActualClockOut = e.TimeEntry?.ClockOutTime,
-                            ActualHours = e.TimeEntry?.TotalHours,
-                            BreakMinutes = e.TimeEntry?.BreakMinutes
-                        })
-                        .ToList()
-                };
-
-                return Ok(response);
-            }
-            catch (Exception ex)
-            {
-                return StatusCode(500, new { message = "Error retrieving timesheet details", error = ex.Message });
-            }
-        }
-
-        // ============================================
-        // GET PENDING TIMESHEETS (Role-Based)
-        // ============================================
-        [HttpGet("Pending")]
-        public async Task<IActionResult> GetPendingTimesheets(
-            [FromQuery] int? departmentId = null)
-        {
-            try
-            {
-                var userId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? "0");
-                var user = await _dbContext.Users
-                    .Include(u => u.Employee)
-                    .FirstOrDefaultAsync(u => u.UserId == userId);
-
-                if (user?.Employee == null)
-                {
-                    return BadRequest(new { message = "Employee record not found" });
-                }
-
-                var roles = GetUserRoles();
-                var isAdminOrExec = roles.Contains("Admin") || roles.Contains("Executive");
-                var isDirector = roles.Contains("Director");
-
-                // Only Directors, Executives, and Admins can access
-                if (!isDirector && !isAdminOrExec)
-                {
-                    return Forbid();
-                }
-
-                var query = _dbContext.Timesheets
-                    .Include(t => t.Employee)
-                        .ThenInclude(e => e.Department)
-                    .Where(t => t.Status == "Submitted");
-
-                // Directors see only their department (unless they're also Admin/Executive)
-                if (isDirector && !isAdminOrExec)
-                {
-                    query = query.Where(t => t.Employee.DepartmentId == user.Employee.DepartmentId);
-                }
-
-                // Optional department filter (for Admin/Executive)
-                if (departmentId.HasValue && isAdminOrExec)
-                {
-                    query = query.Where(t => t.Employee.DepartmentId == departmentId.Value);
-                }
-
-                var timesheets = await query
-                    .OrderBy(t => t.Employee.Department.DepartmentName)
-                    .ThenBy(t => t.SubmittedAt)
-                    .Select(t => new
-                    {
-                        t.TimesheetId,
+                        t.TimeEntryId,
                         t.EmployeeId,
-                        EmployeeName = t.Employee.FirstName + " " + t.Employee.LastName,
-                        t.Employee.EmployeeCode,
-                        t.Employee.JobTitle,
-                        t.Employee.DepartmentId,
-                        DepartmentName = t.Employee.Department.DepartmentName,
-                        t.StartDate,
-                        t.EndDate,
+                        employeeName = $"{t.Employee!.FirstName} {t.Employee.LastName}",
+                        employeeCode = t.Employee.EmployeeCode,
+                        departmentName = t.Employee.Department != null ? t.Employee.Department.DepartmentName : null,
+                        t.WorkDate,
+                        t.ClockInTime,
+                        t.ClockOutTime,
                         t.TotalHours,
                         t.RegularHours,
                         t.OvertimeHours,
+                        t.BreakMinutes,
                         t.Status,
-                        t.SubmittedAt,
-                        EntryCount = t.TimesheetEntries.Count,
-                        DaysWorked = t.TimesheetEntries.Count(e => e.Hours > 0)
+                        t.ClockInLocation,
+                        t.ClockOutLocation,
+                        t.Notes
                     })
                     .ToListAsync();
 
-                return Ok(new
-                {
-                    timesheets,
-                    totalCount = timesheets.Count,
-                    userRole = isAdminOrExec ? "Admin/Executive" : "Director",
-                    canApproveAll = isAdminOrExec
-                });
+                return Ok(entries);
             }
             catch (Exception ex)
             {
-                return StatusCode(500, new { message = "Error retrieving pending timesheets", error = ex.Message });
+                return StatusCode(500, new { message = "Error retrieving time entries", error = ex.Message });
             }
         }
 
         // ============================================
-        // SUBMIT TIMESHEET FOR APPROVAL
+        // MANUAL TIME ENTRY (for corrections/missed punches)
         // ============================================
-        [HttpPost("{id}/Submit")]
-        public async Task<IActionResult> SubmitTimesheet(int id)
+        [HttpPost("Manual")]
+        public async Task<IActionResult> AddManualTimeEntry([FromBody] ManualEntryRequest request)
         {
             try
             {
@@ -309,399 +386,96 @@ namespace HRManagementAPI.Controllers
                     return BadRequest(new { message = "Employee record not found" });
                 }
 
-                var timesheet = await _dbContext.Timesheets
-                    .Include(t => t.TimesheetEntries)
-                    .FirstOrDefaultAsync(t => t.TimesheetId == id);
-
-                if (timesheet == null)
+                // Validate times
+                if (request.ClockInTime >= request.ClockOutTime)
                 {
-                    return NotFound(new { message = "Timesheet not found" });
+                    return BadRequest(new { message = "Clock out time must be after clock in time" });
                 }
 
-                // Check ownership
-                if (timesheet.EmployeeId != employee.EmployeeId)
-                {
-                    return Forbid();
-                }
-
-                // Check status
-                if (timesheet.Status != "Draft" && timesheet.Status != "Rejected")
-                {
-                    return BadRequest(new { message = "Only Draft or Rejected timesheets can be submitted" });
-                }
-
-                // Validate timesheet has entries
-                if (!timesheet.TimesheetEntries.Any())
-                {
-                    return BadRequest(new { message = "Cannot submit empty timesheet" });
-                }
-
-                // Update status
-                timesheet.Status = "Submitted";
-                timesheet.SubmittedAt = DateTime.UtcNow;
-                timesheet.UpdatedAt = DateTime.UtcNow;
-                timesheet.RejectionReason = null; // Clear any previous rejection reason
-
-                await _dbContext.SaveChangesAsync();
-
-                // TODO: Send notification to manager/director
-
-                return Ok(new
-                {
-                    message = "Timesheet submitted successfully",
-                    timesheetId = timesheet.TimesheetId,
-                    status = timesheet.Status,
-                    submittedAt = timesheet.SubmittedAt
-                });
-            }
-            catch (Exception ex)
-            {
-                return StatusCode(500, new { message = "Error submitting timesheet", error = ex.Message });
-            }
-        }
-
-        // ============================================
-        // APPROVE TIMESHEET
-        // ============================================
-        [HttpPost("{id}/Approve")]
-        public async Task<IActionResult> ApproveTimesheet(int id, [FromBody] ApprovalRequest request)
-        {
-            try
-            {
-                var userId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? "0");
-                var user = await _dbContext.Users
-                    .Include(u => u.Employee)
-                    .FirstOrDefaultAsync(u => u.UserId == userId);
-
-                if (user?.Employee == null)
-                {
-                    return BadRequest(new { message = "Employee record not found" });
-                }
-
-                var roles = GetUserRoles();
-                var isAdminOrExec = roles.Contains("Admin") || roles.Contains("Executive");
-                var isDirector = roles.Contains("Director");
-
-                // Only Directors, Executives, and Admins can approve
-                if (!isDirector && !isAdminOrExec)
-                {
-                    return Forbid();
-                }
-
-                var timesheet = await _dbContext.Timesheets
-                    .Include(t => t.Employee)
-                    .FirstOrDefaultAsync(t => t.TimesheetId == id);
-
-                if (timesheet == null)
-                {
-                    return NotFound(new { message = "Timesheet not found" });
-                }
-
-                // Check status
-                if (timesheet.Status != "Submitted")
-                {
-                    return BadRequest(new { message = "Only Submitted timesheets can be approved" });
-                }
-
-                // Authorization: Directors can only approve their department
-                if (isDirector && !isAdminOrExec)
-                {
-                    if (timesheet.Employee.DepartmentId != user.Employee.DepartmentId)
-                    {
-                        return Forbid();
-                    }
-                }
-
-                // Update status
-                timesheet.Status = "Approved";
-                timesheet.ApprovedBy = userId;
-                timesheet.ApprovedAt = DateTime.UtcNow;
-                timesheet.UpdatedAt = DateTime.UtcNow;
-                timesheet.RejectionReason = null;
-
-                await _dbContext.SaveChangesAsync();
-
-                // TODO: Send notification to employee
-
-                return Ok(new
-                {
-                    message = "Timesheet approved successfully",
-                    timesheetId = timesheet.TimesheetId,
-                    status = timesheet.Status,
-                    approvedBy = $"{user.Employee.FirstName} {user.Employee.LastName}",
-                    approvedAt = timesheet.ApprovedAt
-                });
-            }
-            catch (Exception ex)
-            {
-                return StatusCode(500, new { message = "Error approving timesheet", error = ex.Message });
-            }
-        }
-
-        // ============================================
-        // REJECT TIMESHEET
-        // ============================================
-        [HttpPost("{id}/Reject")]
-        public async Task<IActionResult> RejectTimesheet(int id, [FromBody] RejectionRequest request)
-        {
-            try
-            {
-                // Validate rejection reason
-                if (string.IsNullOrWhiteSpace(request.RejectionReason))
-                {
-                    return BadRequest(new { message = "Rejection reason is required" });
-                }
-
-                var userId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? "0");
-                var user = await _dbContext.Users
-                    .Include(u => u.Employee)
-                    .FirstOrDefaultAsync(u => u.UserId == userId);
-
-                if (user?.Employee == null)
-                {
-                    return BadRequest(new { message = "Employee record not found" });
-                }
-
-                var roles = GetUserRoles();
-                var isAdminOrExec = roles.Contains("Admin") || roles.Contains("Executive");
-                var isDirector = roles.Contains("Director");
-
-                // Only Directors, Executives, and Admins can reject
-                if (!isDirector && !isAdminOrExec)
-                {
-                    return Forbid();
-                }
-
-                var timesheet = await _dbContext.Timesheets
-                    .Include(t => t.Employee)
-                    .FirstOrDefaultAsync(t => t.TimesheetId == id);
-
-                if (timesheet == null)
-                {
-                    return NotFound(new { message = "Timesheet not found" });
-                }
-
-                // Check status
-                if (timesheet.Status != "Submitted")
-                {
-                    return BadRequest(new { message = "Only Submitted timesheets can be rejected" });
-                }
-
-                // Authorization: Directors can only reject their department
-                if (isDirector && !isAdminOrExec)
-                {
-                    if (timesheet.Employee.DepartmentId != user.Employee.DepartmentId)
-                    {
-                        return Forbid();
-                    }
-                }
-
-                // Update status
-                timesheet.Status = "Rejected";
-                timesheet.RejectionReason = request.RejectionReason;
-                timesheet.UpdatedAt = DateTime.UtcNow;
-                timesheet.ApprovedBy = null;
-                timesheet.ApprovedAt = null;
-
-                await _dbContext.SaveChangesAsync();
-
-                // TODO: Send notification to employee with rejection reason
-
-                return Ok(new
-                {
-                    message = "Timesheet rejected successfully",
-                    timesheetId = timesheet.TimesheetId,
-                    status = timesheet.Status,
-                    rejectionReason = timesheet.RejectionReason,
-                    rejectedBy = $"{user.Employee.FirstName} {user.Employee.LastName}"
-                });
-            }
-            catch (Exception ex)
-            {
-                return StatusCode(500, new { message = "Error rejecting timesheet", error = ex.Message });
-            }
-        }
-
-        // ============================================
-        // CREATE TIMESHEET (From Time Entries)
-        // ============================================
-        [HttpPost("Generate")]
-        public async Task<IActionResult> GenerateTimesheet([FromBody] GenerateTimesheetRequest request)
-        {
-            try
-            {
-                var employee = await GetCurrentEmployee();
-                if (employee == null)
-                {
-                    return BadRequest(new { message = "Employee record not found" });
-                }
-
-                // Validate dates
-                if (request.StartDate >= request.EndDate)
-                {
-                    return BadRequest(new { message = "End date must be after start date" });
-                }
-
-                // Check if timesheet already exists for this period
-                var existingTimesheet = await _dbContext.Timesheets
+                // Check for existing entry on same date
+                var existingEntry = await _dbContext.TimeEntries
                     .FirstOrDefaultAsync(t =>
                         t.EmployeeId == employee.EmployeeId &&
-                        t.StartDate == request.StartDate &&
-                        t.EndDate == request.EndDate);
+                        t.WorkDate == request.WorkDate.Date);
 
-                if (existingTimesheet != null)
+                if (existingEntry != null)
                 {
-                    return BadRequest(new { message = "Timesheet already exists for this period" });
+                    return BadRequest(new { message = "Time entry already exists for this date" });
                 }
 
-                // Get time entries for the period
-                var timeEntries = await _dbContext.TimeEntries
-                    .Where(t =>
-                        t.EmployeeId == employee.EmployeeId &&
-                        t.WorkDate >= request.StartDate &&
-                        t.WorkDate <= request.EndDate &&
-                        t.Status == "Closed")
-                    .OrderBy(t => t.WorkDate)
-                    .ToListAsync();
+                // Calculate hours
+                var workDuration = request.ClockOutTime - request.ClockInTime;
+                var totalMinutes = workDuration.TotalMinutes - request.BreakMinutes;
+                var totalHours = Math.Round(totalMinutes / 60.0, 2);
+                var regularHours = Math.Min(totalHours, 8);
+                var overtimeHours = Math.Max(0, totalHours - 8);
 
-                if (!timeEntries.Any())
-                {
-                    return BadRequest(new { message = "No completed time entries found for this period" });
-                }
-
-                // Calculate totals
-                var totalHours = timeEntries.Sum(t => t.TotalHours ?? 0);
-                var regularHours = timeEntries.Sum(t => t.RegularHours ?? 0);
-                var overtimeHours = timeEntries.Sum(t => t.OvertimeHours ?? 0);
-
-                // Create timesheet
-                var timesheet = new Timesheet
+                // Create time entry
+                var timeEntry = new TimeEntry
                 {
                     EmployeeId = employee.EmployeeId,
-                    StartDate = request.StartDate,
-                    EndDate = request.EndDate,
-                    TotalHours = totalHours,
-                    RegularHours = regularHours,
-                    OvertimeHours = overtimeHours,
-                    Status = "Draft",
+                    WorkDate = request.WorkDate.Date,
+                    ClockInTime = request.ClockInTime,
+                    ClockOutTime = request.ClockOutTime,
+                    TotalHours = (decimal)totalHours,
+                    RegularHours = (decimal)regularHours,
+                    OvertimeHours = (decimal)overtimeHours,
+                    BreakMinutes = request.BreakMinutes,
+                    Notes = $"Manual entry: {request.Notes}",
+                    Status = "Closed",
                     CreatedAt = DateTime.UtcNow
                 };
 
-                _dbContext.Timesheets.Add(timesheet);
-                await _dbContext.SaveChangesAsync();
+                _dbContext.TimeEntries.Add(timeEntry);
 
-                // Create timesheet entries
-                foreach (var timeEntry in timeEntries)
+                // Also create attendance record
+                var attendance = new Attendance
                 {
-                    var entry = new TimesheetEntry
-                    {
-                        TimesheetId = timesheet.TimesheetId,
-                        WorkDate = timeEntry.WorkDate,
-                        TimeEntryId = timeEntry.TimeEntryId,
-                        StartTime = timeEntry.ClockInTime,
-                        EndTime = timeEntry.ClockOutTime,
-                        Hours = timeEntry.TotalHours,
-                        IsBillable = true,
-                        CreatedAt = DateTime.UtcNow
-                    };
-
-                    _dbContext.TimesheetEntries.Add(entry);
-                }
-
-                await _dbContext.SaveChangesAsync();
-
-                return Ok(new
-                {
-                    message = "Timesheet generated successfully",
-                    timesheetId = timesheet.TimesheetId,
-                    totalHours = timesheet.TotalHours,
-                    regularHours = timesheet.RegularHours,
-                    overtimeHours = timesheet.OvertimeHours,
-                    entryCount = timeEntries.Count,
-                    status = timesheet.Status
-                });
-            }
-            catch (Exception ex)
-            {
-                return StatusCode(500, new { message = "Error generating timesheet", error = ex.Message });
-            }
-        }
-
-        // ============================================
-        // GET STATISTICS (Dashboard)
-        // ============================================
-        [HttpGet("Statistics")]
-        public async Task<IActionResult> GetStatistics()
-        {
-            try
-            {
-                var employee = await GetCurrentEmployee();
-                if (employee == null)
-                {
-                    return BadRequest(new { message = "Employee record not found" });
-                }
-
-                var stats = new
-                {
-                    // Current period (last 30 days)
-                    totalTimesheets = await _dbContext.Timesheets
-                        .Where(t => t.EmployeeId == employee.EmployeeId)
-                        .CountAsync(),
-
-                    draftTimesheets = await _dbContext.Timesheets
-                        .Where(t => t.EmployeeId == employee.EmployeeId && t.Status == "Draft")
-                        .CountAsync(),
-
-                    submittedTimesheets = await _dbContext.Timesheets
-                        .Where(t => t.EmployeeId == employee.EmployeeId && t.Status == "Submitted")
-                        .CountAsync(),
-
-                    approvedTimesheets = await _dbContext.Timesheets
-                        .Where(t => t.EmployeeId == employee.EmployeeId && t.Status == "Approved")
-                        .CountAsync(),
-
-                    rejectedTimesheets = await _dbContext.Timesheets
-                        .Where(t => t.EmployeeId == employee.EmployeeId && t.Status == "Rejected")
-                        .CountAsync(),
-
-                    totalHoursThisMonth = await _dbContext.Timesheets
-                        .Where(t => t.EmployeeId == employee.EmployeeId &&
-                                   t.StartDate.Month == DateTime.UtcNow.Month &&
-                                   t.StartDate.Year == DateTime.UtcNow.Year)
-                        .SumAsync(t => t.TotalHours ?? 0),
-
-                    overtimeHoursThisMonth = await _dbContext.Timesheets
-                        .Where(t => t.EmployeeId == employee.EmployeeId &&
-                                   t.StartDate.Month == DateTime.UtcNow.Month &&
-                                   t.StartDate.Year == DateTime.UtcNow.Year)
-                        .SumAsync(t => t.OvertimeHours ?? 0)
+                    EmployeeId = employee.EmployeeId,
+                    AttendanceDate = request.WorkDate.Date,
+                    Status = "Present",
+                    ClockInTime = request.ClockInTime,
+                    ClockOutTime = request.ClockOutTime,
+                    WorkingHours = (decimal)totalHours,
+                    IsLate = false,
+                    IsEarlyLeave = false,
+                    Remarks = $"Manual entry: {request.Notes}",
+                    CreatedAt = DateTime.UtcNow
                 };
 
-                return Ok(stats);
+                _dbContext.Attendance.Add(attendance);
+                await _dbContext.SaveChangesAsync();
+
+                return Ok(new { message = "Manual time entry added successfully" });
             }
             catch (Exception ex)
             {
-                return StatusCode(500, new { message = "Error retrieving statistics", error = ex.Message });
+                return StatusCode(500, new { message = "Error adding manual entry", error = ex.Message });
             }
         }
 
         // ============================================
         // REQUEST MODELS
         // ============================================
-        public class ApprovalRequest
+        public class ClockInRequest
         {
-            public string? Comments { get; set; }
+            public string? Location { get; set; }
+            public string? Notes { get; set; }
         }
 
-        public class RejectionRequest
+        public class ClockOutRequest
         {
-            public string RejectionReason { get; set; } = string.Empty;
+            public string? Location { get; set; }
+            public int BreakMinutes { get; set; }
         }
 
-        public class GenerateTimesheetRequest
+        public class ManualEntryRequest
         {
-            public DateTime StartDate { get; set; }
-            public DateTime EndDate { get; set; }
+            public DateTime WorkDate { get; set; }
+            public DateTime ClockInTime { get; set; }
+            public DateTime ClockOutTime { get; set; }
+            public int BreakMinutes { get; set; }
+            public string? Notes { get; set; }
         }
     }
 }
