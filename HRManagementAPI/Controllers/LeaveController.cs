@@ -7,6 +7,10 @@ using System.Security.Claims;
 
 namespace HRManagementAPI.Controllers
 {
+    /// <summary>
+    /// Leave Management Controller
+    /// Handles leave requests, approvals, PTO balance, and leave types
+    /// </summary>
     [Route("api/[controller]")]
     [ApiController]
     [Authorize]
@@ -25,6 +29,7 @@ namespace HRManagementAPI.Controllers
 
         /// <summary>
         /// Submit a new leave request
+        /// POST /api/Leave/Request
         /// Auto-approves for Admin/Executive, routes to appropriate approver for others
         /// </summary>
         [HttpPost("Request")]
@@ -33,8 +38,6 @@ namespace HRManagementAPI.Controllers
             try
             {
                 // Get current user info
-                var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-                var userRole = User.FindFirst(ClaimTypes.Role)?.Value;
                 var userEmployeeIdClaim = User.FindFirst("EmployeeId")?.Value;
 
                 if (string.IsNullOrEmpty(userEmployeeIdClaim))
@@ -63,12 +66,13 @@ namespace HRManagementAPI.Controllers
                     return BadRequest(new { message = "Invalid leave type" });
                 }
 
-                // ✅ Check 1: Full-Time eligibility for paid leave
-                if (leaveType.RequiresFullTimeStatus && employee.EmploymentType != "FullTime")
+                // ✅ Check 1: PayFrequency validation (CRITICAL FIX)
+                // Hourly employees can ONLY request unpaid leave - PTO is NOT allowed
+                if (employee.PayFrequency == "Hourly" && leaveType.IsPaidLeave)
                 {
                     return BadRequest(new
                     {
-                        message = $"Only full-time employees can request {leaveType.TypeName}. Hourly employees can only request Unpaid Leave."
+                        message = "Hourly employees can only request Unpaid Leave. PTO is only available to salaried employees (Weekly, BiWeekly, Monthly)."
                     });
                 }
 
@@ -78,7 +82,7 @@ namespace HRManagementAPI.Controllers
                     return BadRequest(new { message = "End date cannot be before start date" });
                 }
 
-                // Calculate total days (including weekends for now - can enhance later)
+                // Calculate total days
                 decimal totalDays = (decimal)(request.EndDate - request.StartDate).TotalDays + 1;
 
                 // If half day specified
@@ -87,7 +91,7 @@ namespace HRManagementAPI.Controllers
                     totalDays = 0.5m;
                 }
 
-                // ✅ Check 3: PTO Balance validation
+                // ✅ Check 3: PTO Balance validation (only for PTO requests)
                 if (leaveType.TypeName == "PTO")
                 {
                     var currentYear = DateTime.UtcNow.Year;
@@ -107,7 +111,7 @@ namespace HRManagementAPI.Controllers
                         });
                     }
 
-                    // Check if would exceed annual 20-day limit
+                    // Check if would exceed annual 20-day limit per request
                     if (totalDays > 20)
                     {
                         return BadRequest(new { message = "Cannot request more than 20 days in a single request" });
@@ -192,7 +196,7 @@ namespace HRManagementAPI.Controllers
                 _context.LeaveRequests.Add(leaveRequest);
                 await _context.SaveChangesAsync();
 
-                // If auto-approved, update balance and calendar
+                // If auto-approved and it's PTO, update balance and calendar
                 if (status == "Approved" && leaveType.TypeName == "PTO")
                 {
                     await UpdatePTOBalanceAndCalendar(employeeId, leaveRequest.LeaveRequestId, totalDays, request.StartDate, request.EndDate, request.IsHalfDay);
@@ -203,7 +207,8 @@ namespace HRManagementAPI.Controllers
                 if (approverRoleLevel == 3)
                 {
                     var director = await GetDepartmentDirector(employee.DepartmentId);
-                    approverName = director != null ? $"{director.FirstName} {director.LastName}" : "Department Director";
+                    approverName = director != null ?
+                        $"{director.FirstName} {director.LastName}" : "Department Director";
                 }
                 else if (approverRoleLevel == 2)
                 {
@@ -231,6 +236,7 @@ namespace HRManagementAPI.Controllers
 
         /// <summary>
         /// Get all leave requests for the logged-in employee
+        /// GET /api/Leave/MyRequests
         /// </summary>
         [HttpGet("MyRequests")]
         public async Task<IActionResult> GetMyLeaveRequests()
@@ -283,6 +289,7 @@ namespace HRManagementAPI.Controllers
 
         /// <summary>
         /// Get PTO balance for the logged-in employee
+        /// GET /api/Leave/MyBalance
         /// </summary>
         [HttpGet("MyBalance")]
         public async Task<IActionResult> GetMyPTOBalance()
@@ -304,13 +311,13 @@ namespace HRManagementAPI.Controllers
                     return NotFound(new { message = "Employee not found" });
                 }
 
-                // Check if eligible for PTO
-                if (employee.EmploymentType != "FullTime")
+                // Check if eligible for PTO based on PayFrequency (CRITICAL FIX)
+                if (employee.PayFrequency == "Hourly")
                 {
                     return Ok(new
                     {
                         employeeId = employeeId,
-                        employmentType = employee.EmploymentType,
+                        payFrequency = employee.PayFrequency,
                         isEligible = false,
                         message = "Hourly employees are not eligible for PTO",
                         totalPTODays = 0,
@@ -328,6 +335,7 @@ namespace HRManagementAPI.Controllers
                     {
                         employeeId = employeeId,
                         year = currentYear,
+                        isEligible = true,
                         message = "No balance found for current year. Please contact HR.",
                         totalPTODays = 0,
                         usedPTODays = 0,
@@ -354,13 +362,53 @@ namespace HRManagementAPI.Controllers
         }
 
         // ============================================
-        // 4. GET PENDING APPROVALS (Directors & Executives)
+        // 4. GET LEAVE TYPES
+        // ============================================
+
+        /// <summary>
+        /// Get all active leave types
+        /// GET /api/Leave/Types
+        /// </summary>
+        [HttpGet("Types")]
+        public async Task<IActionResult> GetLeaveTypes()
+        {
+            try
+            {
+                var leaveTypes = await _context.LeaveTypes
+                    .Where(lt => lt.IsActive)
+                    .OrderBy(lt => lt.DisplayOrder)
+                    .Select(lt => new
+                    {
+                        lt.LeaveTypeId,
+                        lt.TypeName,
+                        lt.Description,
+                        lt.IsPaidLeave,
+                        lt.RequiresApproval,
+                        lt.MaxDaysPerYear,
+                        lt.RequiresFullTimeStatus,
+                        lt.Color,
+                        lt.DisplayOrder
+                    })
+                    .ToListAsync();
+
+                return Ok(leaveTypes);
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { message = "Error retrieving leave types", error = ex.Message });
+            }
+        }
+
+        // ============================================
+        // 5. GET PENDING APPROVALS (Directors, Executives, Admin)
         // ============================================
 
         /// <summary>
         /// Get leave requests pending approval for the logged-in user
+        /// GET /api/Leave/PendingApprovals
         /// Directors see their department's requests
         /// Executives see all director requests
+        /// Admin sees all requests
         /// </summary>
         [HttpGet("PendingApprovals")]
         [Authorize(Roles = "Director,Executive,Admin")]
@@ -433,7 +481,8 @@ namespace HRManagementAPI.Controllers
                             FullName = lr.Employee.FirstName + " " + lr.Employee.LastName,
                             lr.Employee.JobTitle,
                             Role = lr.Employee.User.Role.RoleName,
-                            Department = lr.Employee.Department != null ? lr.Employee.Department.DepartmentName : null
+                            Department = lr.Employee.Department != null ?
+                                lr.Employee.Department.DepartmentName : null
                         },
                         LeaveType = lr.LeaveType.TypeName,
                         LeaveTypeColor = lr.LeaveType.Color,
@@ -459,11 +508,12 @@ namespace HRManagementAPI.Controllers
         }
 
         // ============================================
-        // 5. APPROVE LEAVE REQUEST
+        // 6. APPROVE LEAVE REQUEST
         // ============================================
 
         /// <summary>
         /// Approve a leave request
+        /// PUT /api/Leave/Approve/{id}
         /// </summary>
         [HttpPut("Approve/{id}")]
         [Authorize(Roles = "Director,Executive,Admin")]
@@ -558,11 +608,12 @@ namespace HRManagementAPI.Controllers
         }
 
         // ============================================
-        // 6. REJECT LEAVE REQUEST
+        // 7. REJECT LEAVE REQUEST
         // ============================================
 
         /// <summary>
         /// Reject a leave request
+        /// PUT /api/Leave/Reject/{id}
         /// </summary>
         [HttpPut("Reject/{id}")]
         [Authorize(Roles = "Director,Executive,Admin")]
@@ -572,17 +623,14 @@ namespace HRManagementAPI.Controllers
             {
                 var userRole = User.FindFirst(ClaimTypes.Role)?.Value;
                 var userEmployeeIdClaim = User.FindFirst("EmployeeId")?.Value;
-
-                if (string.IsNullOrEmpty(rejection?.RejectionReason))
-                {
-                    return BadRequest(new { message = "Rejection reason is required" });
-                }
+                var userId = User.FindFirst("UserId")?.Value;
 
                 var leaveRequest = await _context.LeaveRequests
                     .Include(lr => lr.Employee)
                         .ThenInclude(e => e.Department)
                     .Include(lr => lr.Employee.User)
                         .ThenInclude(u => u.Role)
+                    .Include(lr => lr.LeaveType)
                     .FirstOrDefaultAsync(lr => lr.LeaveRequestId == id);
 
                 if (leaveRequest == null)
@@ -595,13 +643,19 @@ namespace HRManagementAPI.Controllers
                     return BadRequest(new { message = $"Cannot reject request with status: {leaveRequest.Status}" });
                 }
 
-                // Verify approver is authorized (same logic as approve)
+                if (string.IsNullOrWhiteSpace(rejection?.RejectionReason))
+                {
+                    return BadRequest(new { message = "Rejection reason is required" });
+                }
+
+                // Verify approver is authorized
                 var role = await _context.Roles.FirstOrDefaultAsync(r => r.RoleName == userRole);
                 if (role == null)
                 {
                     return Unauthorized(new { message = "Role not found" });
                 }
 
+                // Check authorization based on role
                 if (role.RoleName == "Director")
                 {
                     var directorEmployee = await _context.Employees.FindAsync(int.Parse(userEmployeeIdClaim));
@@ -622,6 +676,8 @@ namespace HRManagementAPI.Controllers
 
                 // Update leave request status
                 leaveRequest.Status = "Rejected";
+                leaveRequest.ApprovedBy = int.Parse(userId); // Track who rejected
+                leaveRequest.ApprovedAt = DateTime.UtcNow;
                 leaveRequest.RejectionReason = rejection.RejectionReason;
                 leaveRequest.UpdatedAt = DateTime.UtcNow;
 
@@ -642,11 +698,12 @@ namespace HRManagementAPI.Controllers
         }
 
         // ============================================
-        // 7. CANCEL MY REQUEST
+        // 8. CANCEL MY REQUEST
         // ============================================
 
         /// <summary>
         /// Cancel own leave request (only if pending)
+        /// DELETE /api/Leave/Cancel/{id}
         /// </summary>
         [HttpDelete("Cancel/{id}")]
         public async Task<IActionResult> CancelLeaveRequest(int id)
@@ -692,215 +749,6 @@ namespace HRManagementAPI.Controllers
         }
 
         // ============================================
-        // 8. GET LEAVE CALENDAR
-        // ============================================
-
-        /// <summary>
-        /// Get leave calendar for a date range
-        /// Directors see their department, Executives/Admins see all
-        /// </summary>
-        [HttpGet("Calendar")]
-        public async Task<IActionResult> GetLeaveCalendar([FromQuery] DateTime? startDate, [FromQuery] DateTime? endDate, [FromQuery] int? departmentId)
-        {
-            try
-            {
-                var userRole = User.FindFirst(ClaimTypes.Role)?.Value;
-                var userEmployeeIdClaim = User.FindFirst("EmployeeId")?.Value;
-
-                // Default to current month if dates not provided
-                var start = startDate ?? new DateTime(DateTime.UtcNow.Year, DateTime.UtcNow.Month, 1);
-                var end = endDate ?? start.AddMonths(1).AddDays(-1);
-
-                IQueryable<LeaveCalendar> query = _context.LeaveCalendar
-                    .Include(lc => lc.Employee)
-                        .ThenInclude(e => e.Department)
-                    .Include(lc => lc.LeaveRequest)
-                        .ThenInclude(lr => lr.LeaveType)
-                    .Where(lc =>
-                        lc.LeaveDate >= start &&
-                        lc.LeaveDate <= end &&
-                        lc.LeaveRequest.Status == "Approved"
-                    );
-
-                // Apply filters based on role
-                if (userRole == "Director" && !string.IsNullOrEmpty(userEmployeeIdClaim))
-                {
-                    var directorEmployee = await _context.Employees.FindAsync(int.Parse(userEmployeeIdClaim));
-                    if (directorEmployee != null)
-                    {
-                        query = query.Where(lc => lc.Employee.DepartmentId == directorEmployee.DepartmentId);
-                    }
-                }
-                else if (departmentId.HasValue)
-                {
-                    // Filter by specific department if provided
-                    query = query.Where(lc => lc.Employee.DepartmentId == departmentId.Value);
-                }
-
-                var calendar = await query
-                    .OrderBy(lc => lc.LeaveDate)
-                    .Select(lc => new
-                    {
-                        lc.LeaveCalendarId,
-                        lc.LeaveDate,
-                        lc.IsFullDay,
-                        lc.IsFirstHalf,
-                        lc.IsSecondHalf,
-                        Employee = new
-                        {
-                            lc.Employee.EmployeeId,
-                            lc.Employee.EmployeeCode,
-                            FullName = lc.Employee.FirstName + " " + lc.Employee.LastName,
-                            lc.Employee.JobTitle,
-                            Department = lc.Employee.Department != null ? lc.Employee.Department.DepartmentName : null
-                        },
-                        LeaveType = lc.LeaveRequest.LeaveType.TypeName,
-                        LeaveTypeColor = lc.LeaveRequest.LeaveType.Color,
-                        LeaveRequestId = lc.LeaveRequestId
-                    })
-                    .ToListAsync();
-
-                return Ok(calendar);
-            }
-            catch (Exception ex)
-            {
-                return StatusCode(500, new { message = "Error retrieving leave calendar", error = ex.Message });
-            }
-        }
-
-        // ============================================
-        // 9. GET LEAVE TYPES
-        // ============================================
-
-        /// <summary>
-        /// Get all active leave types
-        /// </summary>
-        [HttpGet("Types")]
-        public async Task<IActionResult> GetLeaveTypes()
-        {
-            try
-            {
-                var userEmployeeIdClaim = User.FindFirst("EmployeeId")?.Value;
-                if (string.IsNullOrEmpty(userEmployeeIdClaim))
-                {
-                    return BadRequest(new { message = "Employee ID not found" });
-                }
-
-                int employeeId = int.Parse(userEmployeeIdClaim);
-                var employee = await _context.Employees.FindAsync(employeeId);
-
-                if (employee == null)
-                {
-                    return NotFound(new { message = "Employee not found" });
-                }
-
-                var leaveTypes = await _context.LeaveTypes
-                    .Where(lt => lt.IsActive)
-                    .OrderBy(lt => lt.DisplayOrder)
-                    .Select(lt => new
-                    {
-                        lt.LeaveTypeId,
-                        lt.TypeName,
-                        lt.Description,
-                        lt.IsPaidLeave,
-                        lt.RequiresApproval,
-                        lt.MaxDaysPerYear,
-                        lt.RequiresFullTimeStatus,
-                        lt.Color,
-                        // Check if employee is eligible
-                        IsEligible = !lt.RequiresFullTimeStatus || employee.EmploymentType == "FullTime"
-                    })
-                    .ToListAsync();
-
-                return Ok(leaveTypes);
-            }
-            catch (Exception ex)
-            {
-                return StatusCode(500, new { message = "Error retrieving leave types", error = ex.Message });
-            }
-        }
-
-        // ============================================
-        // 10. GET LEAVE STATS (For Dashboard)
-        // ============================================
-
-        /// <summary>
-        /// Get leave statistics for dashboard
-        /// </summary>
-        [HttpGet("Stats")]
-        public async Task<IActionResult> GetLeaveStats()
-        {
-            try
-            {
-                var userRole = User.FindFirst(ClaimTypes.Role)?.Value;
-                var userEmployeeIdClaim = User.FindFirst("EmployeeId")?.Value;
-
-                if (string.IsNullOrEmpty(userEmployeeIdClaim))
-                {
-                    return BadRequest(new { message = "Employee ID not found" });
-                }
-
-                int employeeId = int.Parse(userEmployeeIdClaim);
-                var currentYear = DateTime.UtcNow.Year;
-
-                // Get employee's stats
-                var myStats = new
-                {
-                    pendingRequests = await _context.LeaveRequests
-                        .CountAsync(lr => lr.EmployeeId == employeeId && lr.Status == "Pending"),
-                    approvedThisYear = await _context.LeaveRequests
-                        .CountAsync(lr => lr.EmployeeId == employeeId &&
-                                         lr.Status == "Approved" &&
-                                         lr.StartDate.Year == currentYear),
-                    upcomingLeaves = await _context.LeaveRequests
-                        .CountAsync(lr => lr.EmployeeId == employeeId &&
-                                         lr.Status == "Approved" &&
-                                         lr.StartDate > DateTime.UtcNow)
-                };
-
-                // Get approver stats (for Directors/Executives)
-                object approverStats = null;
-                if (userRole == "Director" || userRole == "Executive" || userRole == "Admin")
-                {
-                    IQueryable<LeaveRequest> pendingQuery = _context.LeaveRequests
-                        .Include(lr => lr.Employee)
-                        .Where(lr => lr.Status == "Pending" && lr.RequiresApproval == true);
-
-                    if (userRole == "Director")
-                    {
-                        var directorEmployee = await _context.Employees.FindAsync(employeeId);
-                        if (directorEmployee != null)
-                        {
-                            pendingQuery = pendingQuery.Where(lr =>
-                                lr.ApproverRoleLevel == 3 &&
-                                lr.Employee.DepartmentId == directorEmployee.DepartmentId
-                            );
-                        }
-                    }
-                    else if (userRole == "Executive")
-                    {
-                        pendingQuery = pendingQuery.Where(lr => lr.ApproverRoleLevel == 2);
-                    }
-
-                    approverStats = new
-                    {
-                        pendingApprovals = await pendingQuery.CountAsync()
-                    };
-                }
-
-                return Ok(new
-                {
-                    myStats,
-                    approverStats
-                });
-            }
-            catch (Exception ex)
-            {
-                return StatusCode(500, new { message = "Error retrieving leave stats", error = ex.Message });
-            }
-        }
-
-        // ============================================
         // HELPER METHODS
         // ============================================
 
@@ -937,7 +785,7 @@ namespace HRManagementAPI.Controllers
                 balance.UpdatedAt = DateTime.UtcNow;
             }
 
-            // Add to leave calendar
+            // Add to leave calendar (one entry per day)
             for (var date = startDate; date <= endDate; date = date.AddDays(1))
             {
                 var calendarEntry = new LeaveCalendar
@@ -959,9 +807,12 @@ namespace HRManagementAPI.Controllers
     }
 
     // ============================================
-    // DTOs
+    // DTOs (Data Transfer Objects)
     // ============================================
 
+    /// <summary>
+    /// Leave request submission DTO
+    /// </summary>
     public class LeaveRequestDto
     {
         public int LeaveTypeId { get; set; }
@@ -971,11 +822,17 @@ namespace HRManagementAPI.Controllers
         public bool IsHalfDay { get; set; } = false;
     }
 
+    /// <summary>
+    /// Approval DTO
+    /// </summary>
     public class ApprovalDto
     {
         public string? ApprovalNotes { get; set; }
     }
 
+    /// <summary>
+    /// Rejection DTO
+    /// </summary>
     public class RejectionDto
     {
         public string RejectionReason { get; set; } = string.Empty;
