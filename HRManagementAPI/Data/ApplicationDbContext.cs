@@ -46,6 +46,9 @@ namespace HRManagementAPI.Data
         public DbSet<GoalUpdate> GoalUpdates { get; set; }
         public DbSet<Feedback> Feedback { get; set; }
 
+        public DbSet<HRActionType> HRActionTypes { get; set; }
+        public DbSet<HRActionRequest> HRActionRequests { get; set; }
+
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             base.OnModelCreating(modelBuilder);
