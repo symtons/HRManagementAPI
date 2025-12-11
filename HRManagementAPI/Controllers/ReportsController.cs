@@ -3,7 +3,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using HRManagementAPI.Data;
-using System.Data;
+using Microsoft.Data.SqlClient;
 
 namespace HRManagementAPI.Controllers
 {
@@ -44,6 +44,42 @@ namespace HRManagementAPI.Controllers
         }
 
         // =============================================
+        // HELPER: Execute View Query
+        // =============================================
+        private async Task<List<Dictionary<string, object>>> ExecuteViewQuery(string query, params SqlParameter[] parameters)
+        {
+            var result = new List<Dictionary<string, object>>();
+
+            using (var command = _context.Database.GetDbConnection().CreateCommand())
+            {
+                command.CommandText = query;
+                command.CommandType = System.Data.CommandType.Text;
+
+                if (parameters != null)
+                {
+                    command.Parameters.AddRange(parameters);
+                }
+
+                await _context.Database.OpenConnectionAsync();
+
+                using (var reader = await command.ExecuteReaderAsync())
+                {
+                    while (await reader.ReadAsync())
+                    {
+                        var row = new Dictionary<string, object>();
+                        for (int i = 0; i < reader.FieldCount; i++)
+                        {
+                            row[reader.GetName(i)] = reader.IsDBNull(i) ? null : reader.GetValue(i);
+                        }
+                        result.Add(row);
+                    }
+                }
+            }
+
+            return result;
+        }
+
+        // =============================================
         // 1. WORKFORCE REPORTS
         // =============================================
 
@@ -58,11 +94,11 @@ namespace HRManagementAPI.Controllers
                 int? filterDeptId = null;
                 if (userRole == "Director")
                 {
-                    filterDeptId = userDeptId; // Directors see only their department
+                    filterDeptId = userDeptId;
                 }
                 else if (departmentId.HasValue)
                 {
-                    filterDeptId = departmentId; // Admin/Executive can filter by department
+                    filterDeptId = departmentId;
                 }
 
                 var query = @"
@@ -75,10 +111,8 @@ namespace HRManagementAPI.Controllers
                     WHERE (@DepartmentId IS NULL OR DepartmentId = @DepartmentId)
                     ORDER BY LastName, FirstName";
 
-                var result = await _context.Database
-                    .SqlQueryRaw<dynamic>(query,
-                        new Microsoft.Data.SqlClient.SqlParameter("@DepartmentId", (object)filterDeptId ?? DBNull.Value))
-                    .ToListAsync();
+                var result = await ExecuteViewQuery(query,
+                    new SqlParameter("@DepartmentId", (object)filterDeptId ?? DBNull.Value));
 
                 return Ok(new { employees = result, count = result.Count });
             }
@@ -107,10 +141,8 @@ namespace HRManagementAPI.Controllers
 
                 var deptFilter = userRole == "Director" ? userDeptId : (int?)null;
 
-                var result = await _context.Database
-                    .SqlQueryRaw<dynamic>(query,
-                        new Microsoft.Data.SqlClient.SqlParameter("@DepartmentId", (object)deptFilter ?? DBNull.Value))
-                    .ToListAsync();
+                var result = await ExecuteViewQuery(query,
+                    new SqlParameter("@DepartmentId", (object)deptFilter ?? DBNull.Value));
 
                 return Ok(new { departments = result });
             }
@@ -140,11 +172,9 @@ namespace HRManagementAPI.Controllers
 
                 var deptFilter = userRole == "Director" ? userDeptId : (int?)null;
 
-                var result = await _context.Database
-                    .SqlQueryRaw<dynamic>(query,
-                        new Microsoft.Data.SqlClient.SqlParameter("@DepartmentId", (object)deptFilter ?? DBNull.Value),
-                        new Microsoft.Data.SqlClient.SqlParameter("@Year", (object)year ?? DBNull.Value))
-                    .ToListAsync();
+                var result = await ExecuteViewQuery(query,
+                    new SqlParameter("@DepartmentId", (object)deptFilter ?? DBNull.Value),
+                    new SqlParameter("@Year", (object)year ?? DBNull.Value));
 
                 return Ok(new { turnover = result });
             }
@@ -177,10 +207,8 @@ namespace HRManagementAPI.Controllers
 
                 var deptFilter = userRole == "Director" ? userDeptId : (int?)null;
 
-                var result = await _context.Database
-                    .SqlQueryRaw<dynamic>(query,
-                        new Microsoft.Data.SqlClient.SqlParameter("@DepartmentId", (object)deptFilter ?? DBNull.Value))
-                    .ToListAsync();
+                var result = await ExecuteViewQuery(query,
+                    new SqlParameter("@DepartmentId", (object)deptFilter ?? DBNull.Value));
 
                 return Ok(new { payroll = result });
             }
@@ -203,22 +231,9 @@ namespace HRManagementAPI.Controllers
                         JobTitle, DepartmentName, EmployeeCount, 
                         AvgSalary, MinSalary, MaxSalary
                     FROM vw_SalaryByRole
-                    WHERE (@DepartmentId IS NULL OR DepartmentId = (SELECT DepartmentId FROM Departments WHERE DepartmentName = @DepartmentName))
                     ORDER BY AvgSalary DESC";
 
-                // For directors, filter by their department name
-                string deptName = null;
-                if (userRole == "Director" && userDeptId.HasValue)
-                {
-                    var dept = await _context.Departments.FindAsync(userDeptId.Value);
-                    deptName = dept?.DepartmentName;
-                }
-
-                var result = await _context.Database
-                    .SqlQueryRaw<dynamic>(query,
-                        new Microsoft.Data.SqlClient.SqlParameter("@DepartmentId", (object)userDeptId ?? DBNull.Value),
-                        new Microsoft.Data.SqlClient.SqlParameter("@DepartmentName", (object)deptName ?? DBNull.Value))
-                    .ToListAsync();
+                var result = await ExecuteViewQuery(query);
 
                 return Ok(new { salaries = result });
             }
@@ -255,11 +270,9 @@ namespace HRManagementAPI.Controllers
 
                 var deptFilter = userRole == "Director" ? userDeptId : (int?)null;
 
-                var result = await _context.Database
-                    .SqlQueryRaw<dynamic>(query,
-                        new Microsoft.Data.SqlClient.SqlParameter("@Year", currentYear),
-                        new Microsoft.Data.SqlClient.SqlParameter("@DepartmentId", (object)deptFilter ?? DBNull.Value))
-                    .ToListAsync();
+                var result = await ExecuteViewQuery(query,
+                    new SqlParameter("@Year", currentYear),
+                    new SqlParameter("@DepartmentId", (object)deptFilter ?? DBNull.Value));
 
                 return Ok(new { leave = result, year = currentYear });
             }
@@ -287,10 +300,8 @@ namespace HRManagementAPI.Controllers
 
                 var deptFilter = userRole == "Director" ? userDeptId : (int?)null;
 
-                var result = await _context.Database
-                    .SqlQueryRaw<dynamic>(query,
-                        new Microsoft.Data.SqlClient.SqlParameter("@DepartmentId", (object)deptFilter ?? DBNull.Value))
-                    .ToListAsync();
+                var result = await ExecuteViewQuery(query,
+                    new SqlParameter("@DepartmentId", (object)deptFilter ?? DBNull.Value));
 
                 return Ok(new { usage = result });
             }
@@ -319,10 +330,8 @@ namespace HRManagementAPI.Controllers
 
                 var deptFilter = userRole == "Director" ? userDeptId : (int?)null;
 
-                var result = await _context.Database
-                    .SqlQueryRaw<dynamic>(query,
-                        new Microsoft.Data.SqlClient.SqlParameter("@DepartmentId", (object)deptFilter ?? DBNull.Value))
-                    .ToListAsync();
+                var result = await ExecuteViewQuery(query,
+                    new SqlParameter("@DepartmentId", (object)deptFilter ?? DBNull.Value));
 
                 return Ok(new { balances = result });
             }
@@ -357,11 +366,9 @@ namespace HRManagementAPI.Controllers
 
                 var deptFilter = userRole == "Director" ? userDeptId : (int?)null;
 
-                var result = await _context.Database
-                    .SqlQueryRaw<dynamic>(query,
-                        new Microsoft.Data.SqlClient.SqlParameter("@PeriodId", (object)periodId ?? DBNull.Value),
-                        new Microsoft.Data.SqlClient.SqlParameter("@DepartmentId", (object)deptFilter ?? DBNull.Value))
-                    .ToListAsync();
+                var result = await ExecuteViewQuery(query,
+                    new SqlParameter("@PeriodId", (object)periodId ?? DBNull.Value),
+                    new SqlParameter("@DepartmentId", (object)deptFilter ?? DBNull.Value));
 
                 return Ok(new { reviews = result });
             }
@@ -391,11 +398,9 @@ namespace HRManagementAPI.Controllers
 
                 var deptFilter = userRole == "Director" ? userDeptId : (int?)null;
 
-                var result = await _context.Database
-                    .SqlQueryRaw<dynamic>(query,
-                        new Microsoft.Data.SqlClient.SqlParameter("@PeriodId", (object)periodId ?? DBNull.Value),
-                        new Microsoft.Data.SqlClient.SqlParameter("@DepartmentId", (object)deptFilter ?? DBNull.Value))
-                    .ToListAsync();
+                var result = await ExecuteViewQuery(query,
+                    new SqlParameter("@PeriodId", (object)periodId ?? DBNull.Value),
+                    new SqlParameter("@DepartmentId", (object)deptFilter ?? DBNull.Value));
 
                 return Ok(new { performance = result });
             }
@@ -423,10 +428,8 @@ namespace HRManagementAPI.Controllers
 
                 var deptFilter = userRole == "Director" ? userDeptId : (int?)null;
 
-                var result = await _context.Database
-                    .SqlQueryRaw<dynamic>(query,
-                        new Microsoft.Data.SqlClient.SqlParameter("@DepartmentId", (object)deptFilter ?? DBNull.Value))
-                    .ToListAsync();
+                var result = await ExecuteViewQuery(query,
+                    new SqlParameter("@DepartmentId", (object)deptFilter ?? DBNull.Value));
 
                 return Ok(new { goals = result });
             }
@@ -457,10 +460,8 @@ namespace HRManagementAPI.Controllers
                     WHERE ApplicationYear = @Year
                     ORDER BY SubmittedAt DESC";
 
-                var result = await _context.Database
-                    .SqlQueryRaw<dynamic>(query,
-                        new Microsoft.Data.SqlClient.SqlParameter("@Year", currentYear))
-                    .ToListAsync();
+                var result = await ExecuteViewQuery(query,
+                    new SqlParameter("@Year", currentYear));
 
                 return Ok(new { applications = result, year = currentYear });
             }
@@ -485,10 +486,8 @@ namespace HRManagementAPI.Controllers
                     WHERE ApplicationYear = @Year
                     ORDER BY ApplicationCount DESC";
 
-                var result = await _context.Database
-                    .SqlQueryRaw<dynamic>(query,
-                        new Microsoft.Data.SqlClient.SqlParameter("@Year", currentYear))
-                    .ToListAsync();
+                var result = await ExecuteViewQuery(query,
+                    new SqlParameter("@Year", currentYear));
 
                 return Ok(new { funnel = result, year = currentYear });
             }
@@ -523,11 +522,9 @@ namespace HRManagementAPI.Controllers
 
                 var deptFilter = userRole == "Director" ? userDeptId : (int?)null;
 
-                var result = await _context.Database
-                    .SqlQueryRaw<dynamic>(query,
-                        new Microsoft.Data.SqlClient.SqlParameter("@Year", currentYear),
-                        new Microsoft.Data.SqlClient.SqlParameter("@DepartmentId", (object)deptFilter ?? DBNull.Value))
-                    .ToListAsync();
+                var result = await ExecuteViewQuery(query,
+                    new SqlParameter("@Year", currentYear),
+                    new SqlParameter("@DepartmentId", (object)deptFilter ?? DBNull.Value));
 
                 return Ok(new { hrActions = result, year = currentYear });
             }
@@ -547,15 +544,14 @@ namespace HRManagementAPI.Controllers
 
                 var query = @"
                     SELECT 
-                        ActionType, Status, RequestCount, AvgProcessingDays, RequestYear
+                        ActionType, TotalRequests, PendingRequests, ApprovedRequests,
+                        AvgProcessingDays, RequestYear
                     FROM vw_HRActionsByType
                     WHERE RequestYear = @Year
-                    ORDER BY RequestCount DESC";
+                    ORDER BY TotalRequests DESC";
 
-                var result = await _context.Database
-                    .SqlQueryRaw<dynamic>(query,
-                        new Microsoft.Data.SqlClient.SqlParameter("@Year", currentYear))
-                    .ToListAsync();
+                var result = await ExecuteViewQuery(query,
+                    new SqlParameter("@Year", currentYear));
 
                 return Ok(new { actionTypes = result, year = currentYear });
             }
@@ -577,7 +573,7 @@ namespace HRManagementAPI.Controllers
             {
                 var (userId, userRole, userDeptId) = GetUserInfo();
 
-                // Get key metrics
+                // Get key metrics using LINQ
                 var totalEmployees = await _context.Employees
                     .Where(e => e.IsActive && e.EmploymentStatus == "Active")
                     .Where(e => userRole != "Director" || e.DepartmentId == userDeptId)
