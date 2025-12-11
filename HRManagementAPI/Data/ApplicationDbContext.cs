@@ -39,11 +39,14 @@ namespace HRManagementAPI.Data
         public DbSet<OvertimeRequest> OvertimeRequests { get; set; }
 
         // Performance Management
-        public DbSet<ReviewCycle> ReviewCycles { get; set; }
-        public DbSet<PerformanceReview> PerformanceReviews { get; set; }
-        public DbSet<ReviewRating> ReviewRatings { get; set; }
+
+        
+
+        public DbSet<ReviewPeriod> ReviewPeriods { get; set; }
+        public DbSet<EmployeeReview> EmployeeReviews { get; set; }
+        public DbSet<RaterAssignment> RaterAssignments { get; set; }
+        public DbSet<Rating> Ratings { get; set; }
         public DbSet<Goal> Goals { get; set; }
-        public DbSet<GoalUpdate> GoalUpdates { get; set; }
         public DbSet<Feedback> Feedback { get; set; }
 
         public DbSet<HRActionType> HRActionTypes { get; set; }

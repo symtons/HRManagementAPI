@@ -1,26 +1,25 @@
 using System;
-using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 
 namespace HRManagementAPI.Models
 {
     // =============================================
-    // Review Cycles
+    // REVIEW PERIOD
     // =============================================
-    [Table("ReviewCycles")]
-    public class ReviewCycle
+    [Table("ReviewPeriods")]
+    public class ReviewPeriod
     {
         [Key]
-        public int ReviewCycleId { get; set; }
+        public int PeriodId { get; set; }
 
         [Required]
-        [StringLength(100)]
-        public string CycleName { get; set; }
+        [StringLength(200)]
+        public string PeriodName { get; set; }
 
         [Required]
         [StringLength(50)]
-        public string ReviewType { get; set; } = "Annual"; // Annual, Quarterly, Mid-Year
+        public string PeriodType { get; set; } // 'Monthly', 'Quarterly', 'Annual'
 
         [Required]
         public DateTime StartDate { get; set; }
@@ -28,100 +27,126 @@ namespace HRManagementAPI.Models
         [Required]
         public DateTime EndDate { get; set; }
 
-        public bool IsActive { get; set; } = true;
+        [Required]
+        public DateTime RatingDeadline { get; set; }
 
-        [StringLength(500)]
-        public string? Description { get; set; }
+        [StringLength(50)]
+        public string Status { get; set; } = "Active"; // 'Active', 'Closed'
 
+        public int CreatedBy { get; set; }
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
-        public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
-
-        // Navigation properties
-        public virtual ICollection<PerformanceReview>? PerformanceReviews { get; set; }
     }
 
     // =============================================
-    // Performance Reviews
+    // EMPLOYEE REVIEW
     // =============================================
-    [Table("PerformanceReviews")]
-    public class PerformanceReview
+    [Table("EmployeeReviews")]
+    public class EmployeeReview
     {
         [Key]
-        public int ReviewId { get; set; }
+        public int EmployeeReviewId { get; set; }
+
+        [Required]
+        public int PeriodId { get; set; }
 
         [Required]
         public int EmployeeId { get; set; }
 
-        public int? ReviewerId { get; set; }
+        public int TotalRaters { get; set; }
+        public int CompletedRatings { get; set; } = 0;
 
-        [Required]
-        public int ReviewCycleId { get; set; }
+        [Column(TypeName = "decimal(5,2)")]
+        public decimal? FinalScore { get; set; }
 
-        public string? SelfAssessment { get; set; }
-        public string? ManagerAssessment { get; set; }
-
-        [Column(TypeName = "decimal(3,2)")]
-        public decimal? OverallRating { get; set; }
-
-        [Required]
         [StringLength(50)]
-        public string Status { get; set; } = "Draft"; // Draft, Submitted, UnderReview, Completed
+        public string Status { get; set; } = "Open"; // 'Open', 'InProgress', 'Completed'
 
-        public DateTime? ReviewDate { get; set; }
-        public DateTime? DueDate { get; set; }
+        public int? CompanyWideRank { get; set; }
+        public int? DepartmentRank { get; set; }
+        public int? RoleRank { get; set; }
 
-        public string? Strengths { get; set; }
-        public string? AreasForImprovement { get; set; }
-        public string? Goals { get; set; }
-        public string? Comments { get; set; }
-
+        public DateTime? CompletedAt { get; set; }
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
-        public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
-        // Navigation properties
+        // Navigation
         [ForeignKey("EmployeeId")]
-        public virtual Employee? Employee { get; set; }
+        public virtual Employee Employee { get; set; }
 
-        [ForeignKey("ReviewerId")]
-        public virtual Employee? Reviewer { get; set; }
-
-        [ForeignKey("ReviewCycleId")]
-        public virtual ReviewCycle? ReviewCycle { get; set; }
-
-        public virtual ICollection<ReviewRating>? ReviewRatings { get; set; }
+        [ForeignKey("PeriodId")]
+        public virtual ReviewPeriod Period { get; set; }
     }
 
     // =============================================
-    // Review Ratings (Competency-based)
+    // RATER ASSIGNMENT
     // =============================================
-    [Table("ReviewRatings")]
-    public class ReviewRating
+    [Table("RaterAssignments")]
+    public class RaterAssignment
+    {
+        [Key]
+        public int AssignmentId { get; set; }
+
+        [Required]
+        public int EmployeeReviewId { get; set; }
+
+        [Required]
+        public int RaterId { get; set; }
+
+        [Required]
+        [StringLength(100)]
+        public string RaterRole { get; set; } // 'Direct Manager', 'Director', 'Executive', 'Admin'
+
+        public bool IsCompleted { get; set; } = false;
+        public DateTime? CompletedAt { get; set; }
+        public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+        // Navigation
+        [ForeignKey("RaterId")]
+        public virtual Employee Rater { get; set; }
+    }
+
+    // =============================================
+    // RATING
+    // =============================================
+    [Table("Ratings")]
+    public class Rating
     {
         [Key]
         public int RatingId { get; set; }
 
         [Required]
-        public int ReviewId { get; set; }
+        public int EmployeeReviewId { get; set; }
+
+        [Required]
+        public int RaterId { get; set; }
 
         [Required]
         [StringLength(100)]
-        public string CompetencyName { get; set; }
+        public string RaterRole { get; set; }
 
-        public int? SelfRating { get; set; } // 1-5
-        public int? ManagerRating { get; set; } // 1-5
+        // Ratings (0-100)
+        [Required]
+        public int OverallRating { get; set; }
 
-        [StringLength(500)]
-        public string? Comments { get; set; }
+        public int? QualityOfWork { get; set; }
+        public int? Punctuality { get; set; }
+        public int? Teamwork { get; set; }
+        public int? Initiative { get; set; }
+        public int? Reliability { get; set; }
+        public int? Communication { get; set; }
+        public int? ProblemSolving { get; set; }
+        public int? Leadership { get; set; }
+        public int? TeamManagement { get; set; }
 
-        public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+        public string Comments { get; set; }
+        public DateTime SubmittedAt { get; set; } = DateTime.UtcNow;
 
-        // Navigation properties
-        [ForeignKey("ReviewId")]
-        public virtual PerformanceReview? PerformanceReview { get; set; }
+        // Navigation
+        [ForeignKey("RaterId")]
+        public virtual Employee Rater { get; set; }
     }
 
     // =============================================
-    // Goals
+    // GOAL
     // =============================================
     [Table("Goals")]
     public class Goal
@@ -133,78 +158,35 @@ namespace HRManagementAPI.Models
         public int EmployeeId { get; set; }
 
         [Required]
+        public int CreatedBy { get; set; }
+
+        [Required]
         [StringLength(200)]
         public string Title { get; set; }
 
-        public string? Description { get; set; }
-
-        [StringLength(50)]
-        public string? Category { get; set; } // Professional Development, Performance, Project, Custom
-
-        [StringLength(20)]
-        public string Priority { get; set; } = "Medium"; // Low, Medium, High
-
-        [Required]
-        public DateTime StartDate { get; set; }
+        public string Description { get; set; }
 
         [Required]
         public DateTime DueDate { get; set; }
 
-        public int Progress { get; set; } = 0; // 0-100%
+        public int Progress { get; set; } = 0; // 0-100
 
-        [Required]
         [StringLength(50)]
-        public string Status { get; set; } = "NotStarted"; // NotStarted, InProgress, Completed, Cancelled
-
-        [Required]
-        public int CreatedBy { get; set; }
+        public string Status { get; set; } = "Active"; // 'Active', 'Completed', 'Cancelled'
 
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
         public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
-        // Navigation properties
+        // Navigation
         [ForeignKey("EmployeeId")]
-        public virtual Employee? Employee { get; set; }
+        public virtual Employee Employee { get; set; }
 
         [ForeignKey("CreatedBy")]
-        public virtual Employee? Creator { get; set; }
-
-        public virtual ICollection<GoalUpdate>? GoalUpdates { get; set; }
+        public virtual Employee Creator { get; set; }
     }
 
     // =============================================
-    // Goal Updates
-    // =============================================
-    [Table("GoalUpdates")]
-    public class GoalUpdate
-    {
-        [Key]
-        public int UpdateId { get; set; }
-
-        [Required]
-        public int GoalId { get; set; }
-
-        [Required]
-        public string UpdateText { get; set; }
-
-        [Required]
-        public int Progress { get; set; } // 0-100%
-
-        [Required]
-        public int UpdatedBy { get; set; }
-
-        public DateTime UpdateDate { get; set; } = DateTime.UtcNow;
-
-        // Navigation properties
-        [ForeignKey("GoalId")]
-        public virtual Goal? Goal { get; set; }
-
-        [ForeignKey("UpdatedBy")]
-        public virtual Employee? Updater { get; set; }
-    }
-
-    // =============================================
-    // Feedback
+    // FEEDBACK
     // =============================================
     [Table("Feedback")]
     public class Feedback
@@ -220,21 +202,20 @@ namespace HRManagementAPI.Models
 
         [Required]
         [StringLength(50)]
-        public string FeedbackType { get; set; } // Positive, Constructive, General
+        public string FeedbackType { get; set; } // 'Positive', 'Constructive', 'General'
 
         [Required]
         public string Content { get; set; }
 
         public bool IsAnonymous { get; set; } = false;
         public bool IsRead { get; set; } = false;
-
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
-        // Navigation properties
+        // Navigation
         [ForeignKey("FromEmployeeId")]
-        public virtual Employee? FromEmployee { get; set; }
+        public virtual Employee FromEmployee { get; set; }
 
         [ForeignKey("ToEmployeeId")]
-        public virtual Employee? ToEmployee { get; set; }
+        public virtual Employee ToEmployee { get; set; }
     }
 }
