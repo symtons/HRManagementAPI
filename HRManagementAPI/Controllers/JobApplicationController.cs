@@ -154,6 +154,9 @@ namespace HRManagementAPI.Controllers
             }
         }
 
+        // UPDATED Simple GET Endpoint for JobApplicationController.cs
+        // Replace the simple GET method in HRManagementAPI/Controllers/JobApplicationController.cs
+
         // GET: api/JobApplication
         [HttpGet]
         public async Task<IActionResult> GetAllApplications()
@@ -164,16 +167,50 @@ namespace HRManagementAPI.Controllers
                     .OrderByDescending(a => a.SubmittedAt)
                     .Select(a => new
                     {
+                        // Application IDs
                         a.ApplicationId,
+                        a.ApplicationNumber,
+
+                        // Personal Information
                         a.FirstName,
                         a.LastName,
+                        a.MiddleName,
                         FullName = $"{a.FirstName} {a.LastName}",
+
+                        // ✅ Contact Information - FIXED
                         a.Email,
-                        a.PhoneNumber,
+                        PhoneNumber = a.PhoneNumber ?? a.CellNumber,  // Use PhoneNumber, fallback to CellNumber
+                        a.CellNumber,
+
+                        // Position Information
                         a.PositionAppliedFor,
+                        Position1 = a.PositionAppliedFor,  // Alias for compatibility
+                        a.Position2,
+
+                        // Location
+                        a.City,
+                        a.State,
+                        a.Address,
+                        a.ZipCode,
+
+                        // Status
                         a.Status,
+                        a.ApprovalStatus,
+
+                        // ✅ Dates - FIXED
                         a.SubmittedAt,
-                        a.ApplicationDate
+                        SubmittedAtFormatted = a.SubmittedAt.HasValue
+                            ? a.SubmittedAt.Value.ToString("MMM dd, yyyy")
+                            : "N/A",
+                        a.ApplicationDate,
+                        ApplicationDateFormatted = a.ApplicationDate.HasValue
+                            ? a.ApplicationDate.Value.ToString("MMM dd, yyyy")
+                            : "N/A",
+                        a.ReviewedDate,
+
+                        // Additional Info
+                        a.ReviewedBy,
+                        a.ReviewNotes
                     })
                     .ToListAsync();
 
@@ -207,7 +244,70 @@ namespace HRManagementAPI.Controllers
             }
         }
 
-       
+
+        //[HttpGet("All")]
+        //[Authorize(Roles = "Admin,Executive,HRManager")]
+        //public async Task<IActionResult> GetAllApplications(
+        //    [FromQuery] int pageNumber = 1,
+        //    [FromQuery] int pageSize = 10,
+        //    [FromQuery] string? status = null,
+        //    [FromQuery] string? approvalStatus = null,
+        //    [FromQuery] string? searchTerm = null)
+        //{
+        //    var query = _context.JobApplications.AsQueryable();
+
+        //    if (!string.IsNullOrEmpty(status))
+        //        query = query.Where(a => a.Status == status);
+
+        //    if (!string.IsNullOrEmpty(approvalStatus))
+        //        query = query.Where(a => a.ApprovalStatus == approvalStatus);
+
+        //    if (!string.IsNullOrEmpty(searchTerm))
+        //        query = query.Where(a =>
+        //            a.FirstName.Contains(searchTerm) ||
+        //            a.LastName.Contains(searchTerm) ||
+        //            a.CellPhone.Contains(searchTerm) ||
+        //            a.ApplicationNumber.Contains(searchTerm));
+
+        //    var totalCount = await query.CountAsync();
+
+        //    var applications = await query
+        //        .OrderByDescending(a => a.SubmissionDate)
+        //        .Skip((pageNumber - 1) * pageSize)
+        //        .Take(pageSize)
+        //        .Select(a => new {
+        //            a.ApplicationId,
+        //            a.ApplicationNumber,
+        //            a.FirstName,
+        //            a.MiddleName,
+        //            a.LastName,
+        //            a.Position1,
+        //            a.Position2,
+        //            a.CellPhone,
+        //            a.HomePhone,
+        //            a.City,
+        //            a.State,
+        //            a.SubmissionDate,
+        //            a.Status,
+        //            a.ApprovalStatus,
+        //            a.ReviewedBy,
+        //            a.ReviewedDate
+        //        })
+        //        .ToListAsync();
+
+        //    return Ok(new
+        //    {
+        //        applications,
+        //        totalCount,
+        //        pageNumber,
+        //        pageSize,
+        //        totalPages = (int)Math.Ceiling(totalCount / (double)pageSize)
+        //    });
+        //}
+
+        // UPDATED GetAll Endpoint for JobApplicationController.cs
+        // Replace the GetAll method in HRManagementAPI/Controllers/JobApplicationController.cs
+
         [HttpGet("All")]
         [Authorize(Roles = "Admin,Executive,HRManager")]
         public async Task<IActionResult> GetAllApplications(
@@ -219,6 +319,7 @@ namespace HRManagementAPI.Controllers
         {
             var query = _context.JobApplications.AsQueryable();
 
+            // Apply filters
             if (!string.IsNullOrEmpty(status))
                 query = query.Where(a => a.Status == status);
 
@@ -229,28 +330,38 @@ namespace HRManagementAPI.Controllers
                 query = query.Where(a =>
                     a.FirstName.Contains(searchTerm) ||
                     a.LastName.Contains(searchTerm) ||
-                    a.CellPhone.Contains(searchTerm) ||
+                    a.Email.Contains(searchTerm) ||  // ✅ FIXED: Search by Email
+                    a.PhoneNumber.Contains(searchTerm) ||  // ✅ FIXED: Search by PhoneNumber
+                    a.CellNumber.Contains(searchTerm) ||
                     a.ApplicationNumber.Contains(searchTerm));
 
             var totalCount = await query.CountAsync();
 
             var applications = await query
-                .OrderByDescending(a => a.SubmissionDate)
+                .OrderByDescending(a => a.SubmittedAt)  // ✅ FIXED: Use SubmittedAt
                 .Skip((pageNumber - 1) * pageSize)
                 .Take(pageSize)
                 .Select(a => new {
+                    // ✅ FIXED: Match the field names expected by the frontend
                     a.ApplicationId,
                     a.ApplicationNumber,
                     a.FirstName,
                     a.MiddleName,
                     a.LastName,
-                    a.Position1,
+                    FullName = $"{a.FirstName} {a.LastName}",  // ✅ Added FullName
+                    a.Email,  // ✅ FIXED: Added Email
+                    PhoneNumber = a.PhoneNumber ?? a.CellNumber,  // ✅ FIXED: Use PhoneNumber (fallback to CellNumber)
+                    a.CellNumber,  // Keep CellNumber as well
+                    a.PositionAppliedFor,  // ✅ FIXED: Use PositionAppliedFor
+                    Position1 = a.PositionAppliedFor,  // Keep Position1 for compatibility
                     a.Position2,
-                    a.CellPhone,
-                    a.HomePhone,
                     a.City,
                     a.State,
-                    a.SubmissionDate,
+                    a.SubmittedAt,  // ✅ FIXED: Use SubmittedAt instead of SubmissionDate
+                    SubmittedAtFormatted = a.SubmittedAt.HasValue
+                        ? a.SubmittedAt.Value.ToString("MMM dd, yyyy")
+                        : "N/A",  // ✅ Added formatted date
+                    a.ApplicationDate,
                     a.Status,
                     a.ApprovalStatus,
                     a.ReviewedBy,
@@ -350,7 +461,7 @@ namespace HRManagementAPI.Controllers
                 await _context.SaveChangesAsync();
 
                 Console.WriteLine("[DEBUG] Application updated successfully");
-
+                await _context.Database.ExecuteSqlRawAsync("EXEC dbo.sp_ApproveJobApplication @ApplicationId = {0}, @ReviewedByUserId = {1}", id, userId);
                 return Ok(new
                 {
                     message = "Application approved and user account created successfully",
@@ -358,6 +469,8 @@ namespace HRManagementAPI.Controllers
                     userId = user.UserId,
                     note = "User can log in with the generated email and default password"
                 });
+                ;
+
             }
             catch (Exception ex)
             {
@@ -684,7 +797,12 @@ namespace HRManagementAPI.Controllers
 
                 _context.Users.Add(user);
                 await _context.SaveChangesAsync(); // Save to get UserId
-
+                int departmentId = request.DepartmentId;
+                if (departmentId == 0 || departmentId == null)
+                {
+                    departmentId = 6; // Default department
+                    Console.WriteLine($"[HIRE] DepartmentId was null/0, defaulting to 6 for employee: {application.FirstName} {application.LastName}");
+                }
                 // Create Employee record
                 var employee = new Employee
                 {
