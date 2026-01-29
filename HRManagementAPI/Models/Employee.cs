@@ -149,5 +149,25 @@ namespace HRManagementAPI.Models
         public virtual ICollection<Employee> Subordinates { get; set; }
 
         public virtual Banking? Banking { get; set; }
+
+
+        public string? SSN { get; set; }
+        public string? SSNLast4 { get; set; }
+        public string? WorkHoursCategory { get; set; }
+        public string? DriversLicenseNumber { get; set; }
+        public string? DriversLicenseState { get; set; }
+        public DateTime? DriversLicenseExpiration { get; set; }
+        public string? NursingLicenseNumber { get; set; }
+        public string? NursingLicenseState { get; set; }
+        public DateTime? NursingLicenseExpiration { get; set; }
+        public bool IsEligibleForLife { get; set; } = false;
+        public bool IsEligibleFor403B { get; set; } = false;
+        public string? TerminationReason { get; set; }
+        public string? TerminationType { get; set; }
+        public bool? IsEligibleForRehire { get; set; }
+
+    
+        public bool IsEligibleForDental { get; set; } = false;  // ← Add this
+        public bool IsEligibleForVision { get; set; } = false;
     }
 }

@@ -1,5 +1,6 @@
 ﻿using HRManagementAPI.Data;
 using HRManagementAPI.Middleware;
+using HRManagementAPI.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -78,6 +79,7 @@ builder.Services.AddAuthentication(options =>
 });
 
 // Swagger configuration with JWT support
+builder.Services.AddScoped<BulkImportService>();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>
 {
@@ -167,6 +169,7 @@ app.UseAuthorization();
 app.UseAuditLogging();
 
 app.MapControllers();
+
 
 // Log application startup
 var startupLogger = app.Services.GetRequiredService<ILogger<Program>>();

@@ -52,6 +52,9 @@ namespace HRManagementAPI.Data
         public DbSet<HRActionType> HRActionTypes { get; set; }
         public DbSet<HRActionRequest> HRActionRequests { get; set; }
 
+        public DbSet<BulkImportLog> BulkImportLog { get; set; }
+        public DbSet<BulkImportDetail> BulkImportDetails { get; set; }
+
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             base.OnModelCreating(modelBuilder);
