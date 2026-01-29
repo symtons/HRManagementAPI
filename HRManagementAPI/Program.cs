@@ -32,14 +32,19 @@ var logFilePath = Path.Combine(logDirectory, $"errors-{DateTime.Now:yyyy-MM-dd}.
 builder.Services.AddControllers();
 
 // Add CORS policy for React app
+// Add CORS policy for React app
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowReactApp",
         policy => policy
-            
-            .AllowAnyOrigin()
+            .WithOrigins(
+                "http://localhost:3000",           // Local development
+                "https://tpasample.ngrok.app",     // Your ngrok frontend
+                "https://localhost:7144"            // Local API testing
+            )
             .AllowAnyMethod()
-            .AllowAnyHeader());
+            .AllowAnyHeader()
+            .AllowCredentials());  // Needed for authentication tokens
 });
 
 // Add HttpContextAccessor for accessing HTTP context in middleware
