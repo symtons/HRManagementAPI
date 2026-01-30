@@ -27,7 +27,7 @@ namespace HRManagementAPI.Controllers
              [FromQuery] string? employeeType = null,
              [FromQuery] string? employmentStatus = null,
              [FromQuery][Range(1, int.MaxValue)] int pageNumber = 1,  // ✅ FIXED: Must be >= 1
-             
+
              [FromQuery][Range(1, 100)] int pageSize = 10)
         {
             try
@@ -239,6 +239,12 @@ namespace HRManagementAPI.Controllers
                     employee.HireDate,
                     employee.TerminationDate,
 
+                    // Additional Information (NEW - from bulk import)
+                    employee.SSNLast4,
+                    employee.WorkHoursCategory,
+                    employee.DriversLicenseExpiration,
+                    employee.NursingLicenseExpiration,
+
                     // Department & Manager
                     Department = employee.Department != null ? new
                     {
@@ -268,10 +274,14 @@ namespace HRManagementAPI.Controllers
                                         (userEmployeeIdClaim == employee.EmployeeId.ToString()))
                                         ? employee.BankRoutingNumber : null,
 
-                    // Benefits
+                    // Benefits (NEW - includes all benefit eligibility flags)
                     employee.IsEligibleForPTO,
                     employee.PTOBalance,
                     employee.IsEligibleForInsurance,
+                    employee.IsEligibleForDental,
+                    employee.IsEligibleForVision,
+                    employee.IsEligibleForLife,
+                    employee.IsEligibleFor403B,
 
                     // User Account
                     User = employee.User != null ? new
@@ -490,8 +500,8 @@ namespace HRManagementAPI.Controllers
         public string? PersonalEmail { get; set; }
 
         // Address
-        public string? Address{ get; set; }
-       
+        public string? Address { get; set; }
+
         public string? City { get; set; }
         public string? State { get; set; }
         public string? ZipCode { get; set; }

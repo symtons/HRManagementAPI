@@ -30,15 +30,27 @@ namespace HRManagementAPI.Services
 
             for (int row = 2; row <= rowCount; row++)
             {
+                // Skip empty rows - check if at least name or email exists
+                var firstName = sheet.Cells[row, 2].Text;
+                var lastName = sheet.Cells[row, 1].Text;
+                var email = sheet.Cells[row, 6].Text;
+
+                if (string.IsNullOrWhiteSpace(firstName) &&
+                    string.IsNullOrWhiteSpace(lastName) &&
+                    string.IsNullOrWhiteSpace(email))
+                {
+                    continue; // Skip this empty row
+                }
+
                 rows.Add(new EmployeeExcelRow
                 {
                     RowNumber = row,
-                    LastName = sheet.Cells[row, 1].Text,
-                    FirstName = sheet.Cells[row, 2].Text,
+                    LastName = lastName,
+                    FirstName = firstName,
                     DateOfHire = sheet.Cells[row, 3].GetValue<DateTime?>(),
                     DateOfBirth = sheet.Cells[row, 4].GetValue<DateTime?>(),
                     SSN = sheet.Cells[row, 5].Text,
-                    Email = sheet.Cells[row, 6].Text,
+                    Email = email,
                     Address = sheet.Cells[row, 7].Text,
                     Status = sheet.Cells[row, 8].Text,
                     Hours = sheet.Cells[row, 9].Text,
