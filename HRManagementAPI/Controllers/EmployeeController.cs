@@ -1,10 +1,13 @@
 ﻿using HRManagementAPI.Data;
 using HRManagementAPI.Models;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using System.ComponentModel.DataAnnotations;
 using System.Security.Claims;
+using Microsoft.Data.SqlClient;
 
 namespace HRManagementAPI.Controllers
 {
@@ -310,118 +313,115 @@ namespace HRManagementAPI.Controllers
         {
             try
             {
-                // Get current user's role
+                // Get current user info
+                var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
                 var userRole = User.FindFirst(ClaimTypes.Role)?.Value;
                 var userEmployeeIdClaim = User.FindFirst("EmployeeId")?.Value;
 
-                if (string.IsNullOrEmpty(userRole))
+                if (string.IsNullOrEmpty(userIdClaim) || string.IsNullOrEmpty(userRole))
                 {
-                    return Unauthorized(new { message = "User role not found" });
+                    return Unauthorized(new { message = "User information not found" });
                 }
 
-                // Get role details
+                var userId = int.Parse(userIdClaim);
+
+                // Check permissions
                 var role = await _context.Roles.FirstOrDefaultAsync(r => r.RoleName == userRole);
                 if (role == null)
                 {
                     return NotFound(new { message = "Role not found" });
                 }
 
-                // Find the employee to update
-                var employee = await _context.Employees
-                    .Include(e => e.User)
-                    .Include(e => e.Department)
-                    .FirstOrDefaultAsync(e => e.EmployeeId == id);
-
-                if (employee == null)
-                {
-                    return NotFound(new { message = "Employee not found" });
-                }
-
-                // Check permission: Directors can only edit their department employees
+                // Directors can only edit their department employees
                 if (role.RoleName == "Director" && !string.IsNullOrEmpty(userEmployeeIdClaim))
                 {
                     var currentEmployee = await _context.Employees.FindAsync(int.Parse(userEmployeeIdClaim));
-                    if (currentEmployee == null || employee.DepartmentId != currentEmployee.DepartmentId)
+                    var targetEmployee = await _context.Employees.FindAsync(id);
+
+                    if (currentEmployee == null || targetEmployee == null ||
+                        targetEmployee.DepartmentId != currentEmployee.DepartmentId)
                     {
                         return Forbid("You can only edit employees in your department");
                     }
                 }
 
-                // Validate department if changed
-                if (request.DepartmentId.HasValue && request.DepartmentId != employee.DepartmentId)
+                // Call stored procedure
+                var parameters = new[]
                 {
-                    var department = await _context.Departments.FindAsync(request.DepartmentId.Value);
-                    if (department == null)
-                    {
-                        return BadRequest(new { message = "Invalid department" });
-                    }
+            new SqlParameter("@EmployeeId", id),
+            new SqlParameter("@UpdatedByUserId", userId),
+            
+            // Personal Info
+            new SqlParameter("@FirstName", request.FirstName),
+            new SqlParameter("@LastName", request.LastName),
+            new SqlParameter("@MiddleName", (object)request.MiddleName ?? DBNull.Value),
+            new SqlParameter("@DateOfBirth", (object)request.DateOfBirth ?? DBNull.Value),
+            new SqlParameter("@Gender", (object)request.Gender ?? DBNull.Value),
+            new SqlParameter("@MaritalStatus", (object)request.MaritalStatus ?? DBNull.Value),
+            
+            // Contact
+            new SqlParameter("@PhoneNumber", (object)request.PhoneNumber ?? DBNull.Value),
+            new SqlParameter("@PersonalEmail", (object)request.PersonalEmail ?? DBNull.Value),
+            new SqlParameter("@Address", (object)request.Address ?? DBNull.Value),
+            new SqlParameter("@City", (object)request.City ?? DBNull.Value),
+            new SqlParameter("@State", (object)request.State ?? DBNull.Value),
+            new SqlParameter("@ZipCode", (object)request.ZipCode ?? DBNull.Value),
+            new SqlParameter("@Country", (object)request.Country ?? DBNull.Value),
+            
+            // Emergency Contact
+            new SqlParameter("@EmergencyContactName", (object)request.EmergencyContactName ?? DBNull.Value),
+            new SqlParameter("@EmergencyContactPhone", (object)request.EmergencyContactPhone ?? DBNull.Value),
+            new SqlParameter("@EmergencyContactRelationship", (object)request.EmergencyContactRelationship ?? DBNull.Value),
+            
+            // Employment
+            new SqlParameter("@DepartmentId", (object)request.DepartmentId ?? DBNull.Value),
+            new SqlParameter("@ManagerId", (object)request.ManagerId ?? DBNull.Value),
+            new SqlParameter("@JobTitle", (object)request.JobTitle ?? DBNull.Value),
+            new SqlParameter("@EmployeeType", request.EmployeeType),
+            new SqlParameter("@EmploymentType", request.EmploymentType),
+            new SqlParameter("@PayFrequency", (object)request.PayFrequency ?? DBNull.Value),
+            new SqlParameter("@Salary", (object)request.Salary ?? DBNull.Value),
+            
+            // Licenses
+            new SqlParameter("@SSN", (object)request.SSN ?? DBNull.Value),
+            new SqlParameter("@DriversLicenseNumber", (object)request.DriversLicenseNumber ?? DBNull.Value),
+            new SqlParameter("@DriversLicenseState", (object)request.DriversLicenseState ?? DBNull.Value),
+            new SqlParameter("@DriversLicenseExpiration", (object)request.DriversLicenseExpiration ?? DBNull.Value),
+            new SqlParameter("@NursingLicenseNumber", (object)request.NursingLicenseNumber ?? DBNull.Value),
+            new SqlParameter("@NursingLicenseState", (object)request.NursingLicenseState ?? DBNull.Value),
+            new SqlParameter("@NursingLicenseExpiration", (object)request.NursingLicenseExpiration ?? DBNull.Value),
+            
+            // Benefits
+            new SqlParameter("@IsEligibleForPTO", request.IsEligibleForPTO),
+            new SqlParameter("@PTOBalance", request.PTOBalance),
+            new SqlParameter("@IsEligibleForInsurance", request.IsEligibleForInsurance),
+            new SqlParameter("@IsEligibleForDental", request.IsEligibleForDental),
+            new SqlParameter("@IsEligibleForVision", request.IsEligibleForVision),
+            new SqlParameter("@IsEligibleForLife", request.IsEligibleForLife),
+            new SqlParameter("@IsEligibleFor403B", request.IsEligibleFor403B)
+        };
+
+                // Execute stored procedure
+                var result = await _context.Database
+                    .SqlQueryRaw<SpResult>("EXEC sp_UpdateEmployee " +
+                        "@EmployeeId, @UpdatedByUserId, " +
+                        "@FirstName, @LastName, @MiddleName, @DateOfBirth, @Gender, @MaritalStatus, " +
+                        "@PhoneNumber, @PersonalEmail, @Address, @City, @State, @ZipCode, @Country, " +
+                        "@EmergencyContactName, @EmergencyContactPhone, @EmergencyContactRelationship, " +
+                        "@DepartmentId, @ManagerId, @JobTitle, @EmployeeType, @EmploymentType, @PayFrequency, @Salary, " +
+                        "@SSN, @DriversLicenseNumber, @DriversLicenseState, @DriversLicenseExpiration, " +
+                        "@NursingLicenseNumber, @NursingLicenseState, @NursingLicenseExpiration, " +
+                        "@IsEligibleForPTO, @PTOBalance, @IsEligibleForInsurance, @IsEligibleForDental, " +
+                        "@IsEligibleForVision, @IsEligibleForLife, @IsEligibleFor403B",
+                        parameters)
+                    .ToListAsync();
+
+                if (result.Any() && result.First().Result == "Error")
+                {
+                    return BadRequest(new { message = result.First().Message });
                 }
 
-                // Validate employee code uniqueness if changed
-                if (!string.IsNullOrEmpty(request.EmployeeCode) && request.EmployeeCode != employee.EmployeeCode)
-                {
-                    if (await _context.Employees.AnyAsync(e => e.EmployeeCode == request.EmployeeCode && e.EmployeeId != id))
-                    {
-                        return BadRequest(new { message = "Employee code already exists" });
-                    }
-                }
-
-                // Update employee fields
-                employee.FirstName = request.FirstName ?? employee.FirstName;
-                employee.LastName = request.LastName ?? employee.LastName;
-                employee.EmployeeCode = request.EmployeeCode ?? employee.EmployeeCode;
-                employee.DepartmentId = request.DepartmentId ?? employee.DepartmentId;
-                employee.JobTitle = request.JobTitle ?? employee.JobTitle;
-                employee.EmployeeType = request.EmployeeType ?? employee.EmployeeType;
-
-                // Personal Info
-                if (request.DateOfBirth.HasValue) employee.DateOfBirth = request.DateOfBirth;
-                if (!string.IsNullOrEmpty(request.Gender)) employee.Gender = request.Gender;
-                if (!string.IsNullOrEmpty(request.PhoneNumber)) employee.PhoneNumber = request.PhoneNumber;
-                if (!string.IsNullOrEmpty(request.PersonalEmail)) employee.PersonalEmail = request.PersonalEmail;
-
-                // Address
-                if (!string.IsNullOrEmpty(request.Address)) employee.Address = request.Address;
-                employee.Address = request.Address; // Can be null
-                if (!string.IsNullOrEmpty(request.City)) employee.City = request.City;
-                if (!string.IsNullOrEmpty(request.State)) employee.State = request.State;
-                if (!string.IsNullOrEmpty(request.ZipCode)) employee.ZipCode = request.ZipCode;
-
-                // Employment Info
-                if (request.HireDate.HasValue) employee.HireDate = request.HireDate;
-                if (request.ManagerId.HasValue) employee.ManagerId = request.ManagerId;
-                if (!string.IsNullOrEmpty(request.EmploymentStatus)) employee.EmploymentStatus = request.EmploymentStatus;
-
-                // Emergency Contact
-                if (!string.IsNullOrEmpty(request.EmergencyContactName)) employee.EmergencyContactName = request.EmergencyContactName;
-                if (!string.IsNullOrEmpty(request.EmergencyContactRelationship)) employee.EmergencyContactRelationship = request.EmergencyContactRelationship;
-                if (!string.IsNullOrEmpty(request.EmergencyContactPhone)) employee.EmergencyContactPhone = request.EmergencyContactPhone;
-
-                // Update PTO eligibility if EmployeeType changed
-                if (request.EmployeeType != null && request.EmployeeType != employee.EmployeeType)
-                {
-                    if (request.EmployeeType == "AdminStaff")
-                    {
-                        employee.IsEligibleForPTO = true;
-                        employee.IsEligibleForInsurance = true;
-                    }
-                    else
-                    {
-                        employee.IsEligibleForPTO = false;
-                        employee.IsEligibleForInsurance = false;
-                    }
-                }
-
-                employee.UpdatedAt = DateTime.UtcNow;
-
-                await _context.SaveChangesAsync();
-
-                return Ok(new
-                {
-                    message = "Employee updated successfully",
-                    employeeId = employee.EmployeeId,
-                    employeeCode = employee.EmployeeCode
-                });
+                return Ok(new { message = "Employee updated successfully" });
             }
             catch (Exception ex)
             {
@@ -488,37 +488,76 @@ namespace HRManagementAPI.Controllers
 
 
     }
-
     public class UpdateEmployeeRequest
     {
         // Personal Info
-        public string? FirstName { get; set; }
-        public string? LastName { get; set; }
+        [Required]
+        public string FirstName { get; set; }
+
+        [Required]
+        public string LastName { get; set; }
+
+        public string? MiddleName { get; set; }
         public DateTime? DateOfBirth { get; set; }
         public string? Gender { get; set; }
+        public string? MaritalStatus { get; set; }
+
+        // Contact
         public string? PhoneNumber { get; set; }
+
+        [EmailAddress]
         public string? PersonalEmail { get; set; }
 
-        // Address
         public string? Address { get; set; }
-
         public string? City { get; set; }
         public string? State { get; set; }
         public string? ZipCode { get; set; }
-
-        // Employment Info
-        public string? EmployeeCode { get; set; }
-        public string? EmployeeType { get; set; }
-        public int? DepartmentId { get; set; }
-        public string? JobTitle { get; set; }
-        public DateTime? HireDate { get; set; }
-        public int? ManagerId { get; set; }
-        public string? EmploymentStatus { get; set; }
+        public string? Country { get; set; }
 
         // Emergency Contact
         public string? EmergencyContactName { get; set; }
-        public string? EmergencyContactRelationship { get; set; }
         public string? EmergencyContactPhone { get; set; }
+        public string? EmergencyContactRelationship { get; set; }
+
+        // Employment
+        public int? DepartmentId { get; set; }
+        public int? ManagerId { get; set; }
+        public string? JobTitle { get; set; }
+
+        [Required]
+        public string EmployeeType { get; set; }
+
+        [Required]
+        public string EmploymentType { get; set; }
+
+        public string? PayFrequency { get; set; }
+        public decimal? Salary { get; set; }
+
+        // Licenses
+        public string? SSN { get; set; }
+        public string? DriversLicenseNumber { get; set; }
+        public string? DriversLicenseState { get; set; }
+        public DateTime? DriversLicenseExpiration { get; set; }
+        public string? NursingLicenseNumber { get; set; }
+        public string? NursingLicenseState { get; set; }
+        public DateTime? NursingLicenseExpiration { get; set; }
+
+        // Benefits
+        public bool IsEligibleForPTO { get; set; }
+        public decimal PTOBalance { get; set; }
+        public bool IsEligibleForInsurance { get; set; }
+        public bool IsEligibleForDental { get; set; }
+        public bool IsEligibleForVision { get; set; }
+        public bool IsEligibleForLife { get; set; }
+        public bool IsEligibleFor403B { get; set; }
     }
+
+    // Helper class for stored procedure result
+    public class SpResult
+    {
+        public string Result { get; set; }
+        public string Message { get; set; }
+    }
+   
 
 }

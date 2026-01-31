@@ -184,6 +184,106 @@ namespace HRManagementAPI.Controllers
                 return StatusCode(500, new { message = "Error retrieving turnover analysis", error = ex.Message });
             }
         }
+        [HttpGet("workforce/license-compliance")]
+        public async Task<IActionResult> GetLicenseCompliance(
+           [FromQuery] string licenseType = "all",
+           [FromQuery] string status = "all")
+        {
+            try
+            {
+                var (userId, userRole, userDeptId) = GetUserInfo();
+
+                var query = @"
+            SELECT 
+                EmployeeId, EmployeeCode, FirstName, LastName,
+                DepartmentId, DepartmentName, JobTitle, EmployeeType,
+                NursingLicenseExpiration, NursingLicenseStatus, NursingDaysUntilExpiration,
+                DriversLicenseExpiration, DriversLicenseStatus, DriversDaysUntilExpiration,
+                HasExpiredLicense, RequiresAttention
+            FROM vw_LicenseCompliance
+            WHERE (@DepartmentId IS NULL OR DepartmentId = @DepartmentId)
+            ORDER BY 
+                HasExpiredLicense DESC, 
+                RequiresAttention DESC,
+                LastName, FirstName";
+
+                var deptFilter = userRole == "Director" ? userDeptId : (int?)null;
+
+                var allResults = await ExecuteViewQuery(query,
+                    new SqlParameter("@DepartmentId", (object)deptFilter ?? DBNull.Value));
+
+                // Apply filters
+                var filteredResults = allResults.AsEnumerable();
+
+                // Filter by license type
+                if (licenseType.ToLower() != "all")
+                {
+                    if (licenseType.ToLower() == "nursing")
+                    {
+                        filteredResults = filteredResults.Where(r =>
+                            r["NursingLicenseExpiration"] != DBNull.Value);
+                    }
+                    else if (licenseType.ToLower() == "drivers")
+                    {
+                        filteredResults = filteredResults.Where(r =>
+                            r["DriversLicenseExpiration"] != DBNull.Value);
+                    }
+                }
+
+                // Filter by status
+                if (status.ToLower() != "all")
+                {
+                    if (status.ToLower() == "valid")
+                    {
+                        filteredResults = filteredResults.Where(r =>
+                            r["NursingLicenseStatus"].ToString() == "Valid" ||
+                            r["DriversLicenseStatus"].ToString() == "Valid");
+                    }
+                    else if (status.ToLower() == "expiring")
+                    {
+                        filteredResults = filteredResults.Where(r =>
+                            r["NursingLicenseStatus"].ToString() == "Expiring Soon" ||
+                            r["DriversLicenseStatus"].ToString() == "Expiring Soon");
+                    }
+                    else if (status.ToLower() == "expired")
+                    {
+                        filteredResults = filteredResults.Where(r =>
+                            r["NursingLicenseStatus"].ToString() == "Expired" ||
+                            r["DriversLicenseStatus"].ToString() == "Expired");
+                    }
+                }
+
+                var results = filteredResults.ToList();
+
+                // Calculate summary statistics
+                var summary = new
+                {
+                    totalEmployees = results.Count,
+                    nursingLicenses = new
+                    {
+                        total = results.Count(r => r["NursingLicenseExpiration"] != DBNull.Value),
+                        valid = results.Count(r => r["NursingLicenseStatus"].ToString() == "Valid"),
+                        expiringSoon = results.Count(r => r["NursingLicenseStatus"].ToString() == "Expiring Soon"),
+                        expired = results.Count(r => r["NursingLicenseStatus"].ToString() == "Expired")
+                    },
+                    driversLicenses = new
+                    {
+                        total = results.Count(r => r["DriversLicenseExpiration"] != DBNull.Value),
+                        valid = results.Count(r => r["DriversLicenseStatus"].ToString() == "Valid"),
+                        expiringSoon = results.Count(r => r["DriversLicenseStatus"].ToString() == "Expiring Soon"),
+                        expired = results.Count(r => r["DriversLicenseStatus"].ToString() == "Expired")
+                    },
+                    requiresAttention = results.Count(r => Convert.ToInt32(r["RequiresAttention"]) == 1)
+                };
+
+                return Ok(new { licenses = results, summary });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting license compliance report");
+                return StatusCode(500, new { message = "Error retrieving license compliance report", error = ex.Message });
+            }
+        }
 
         // =============================================
         // 2. PAYROLL REPORTS
@@ -497,7 +597,9 @@ namespace HRManagementAPI.Controllers
                 return StatusCode(500, new { message = "Error retrieving hiring funnel", error = ex.Message });
             }
         }
+    
 
+       
         // =============================================
         // 6. HR ACTIONS REPORTS
         // =============================================
