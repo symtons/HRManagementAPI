@@ -136,6 +136,7 @@ namespace HRManagementAPI.Services
                         EmployeeType = row.Department?.Contains("Admin") == true ? "AdminStaff" : "FieldStaff",
                         WorkHoursCategory = row.Hours,
                         JobTitle = row.Title,
+                        DepartmentId=6,
                         DriversLicenseExpiration = row.DLExpiration,
                         NursingLicenseExpiration = row.NursingLicenseExpiration,
                         IsEligibleForPTO = row.PTOTracker?.ToUpper() == "YES",
