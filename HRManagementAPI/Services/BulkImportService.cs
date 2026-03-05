@@ -18,7 +18,7 @@ namespace HRManagementAPI.Services
             _context = context;
         }
 
-        // 
+        // Parse Excel file
         public List<EmployeeExcelRow> ParseExcel(string filePath)
         {
             var rows = new List<EmployeeExcelRow>();
@@ -67,6 +67,33 @@ namespace HRManagementAPI.Services
             return rows;
         }
 
+        // =============================================
+        // CHANGE 1: NEW METHOD - Validate Department Code
+        // =============================================
+        private async Task<(bool isValid, int? departmentId, string? departmentName, string errorMessage)>
+            ValidateDepartmentCode(string? departmentCode)
+        {
+            if (string.IsNullOrWhiteSpace(departmentCode))
+            {
+                return (false, null, null, "Department Code is required");
+            }
+
+            // Normalize the code (trim spaces, uppercase)
+            var normalizedCode = departmentCode.Trim().ToUpper();
+
+            // Look up department in database
+            var department = await _context.Departments
+                .FirstOrDefaultAsync(d => d.DepartmentCode.ToUpper() == normalizedCode && d.IsActive);
+
+            if (department == null)
+            {
+                return (false, null, null,
+                    $"Invalid Department Code: '{departmentCode}'. Valid codes: NUR, EVENT, HR, IT, FIN, PROG");
+            }
+
+            return (true, department.DepartmentId, department.DepartmentName, string.Empty);
+        }
+
         // Import employees
         public async Task<ImportResult> ImportEmployees(List<EmployeeExcelRow> rows, int userId, string fileName)
         {
@@ -94,6 +121,19 @@ namespace HRManagementAPI.Services
                     {
                         result.FailedRecords++;
                         SaveDetail(log.ImportLogId, row, "Failed", "Missing required fields", null, null);
+                        continue;
+                    }
+
+                    // =============================================
+                    // CHANGE 2: NEW - Validate department code
+                    // =============================================
+                    var (isValid, departmentId, departmentName, errorMessage) =
+                        await ValidateDepartmentCode(row.Department);
+
+                    if (!isValid)
+                    {
+                        result.FailedRecords++;
+                        SaveDetail(log.ImportLogId, row, "Failed", errorMessage, null, null);
                         continue;
                     }
 
@@ -136,7 +176,12 @@ namespace HRManagementAPI.Services
                         EmployeeType = row.Department?.Contains("Admin") == true ? "AdminStaff" : "FieldStaff",
                         WorkHoursCategory = row.Hours,
                         JobTitle = row.Title,
-                        DepartmentId=6,
+
+                        // =============================================
+                        // CHANGE 3: UPDATED - Use validated DepartmentId instead of hardcoded 6
+                        // =============================================
+                        DepartmentId = departmentId.Value,  // Was: DepartmentId=6,
+
                         DriversLicenseExpiration = row.DLExpiration,
                         NursingLicenseExpiration = row.NursingLicenseExpiration,
                         IsEligibleForPTO = row.PTOTracker?.ToUpper() == "YES",
