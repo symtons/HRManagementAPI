@@ -241,7 +241,7 @@ namespace HRManagementAPI.Controllers
                     employee.EmploymentStatus,
                     employee.HireDate,
                     employee.TerminationDate,
-
+                    SSN = (role.RoleName == "Admin" || role.RoleName == "Executive") ? employee.SSN : null,
                     // Additional Information (NEW - from bulk import)
                     employee.SSNLast4,
                     employee.WorkHoursCategory,
